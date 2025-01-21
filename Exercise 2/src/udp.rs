@@ -2,7 +2,7 @@ use std::{net::UdpSocket, thread::sleep, time::Duration};
 
 // 10.100.23.204
 
-pub fn udp(port: u32) -> std::io::Result<()> {
+pub fn udp() -> std::io::Result<()> {
     // loop {
     //     let socket = UdpSocket::bind("0.0.0.0:30000")?;
 
@@ -17,7 +17,7 @@ pub fn udp(port: u32) -> std::io::Result<()> {
     let receive_socket = UdpSocket::bind("0.0.0.0:20026")?;
     let send_socket = UdpSocket::bind("0.0.0.0:0")?;
     send_socket.set_broadcast(true)?;
-    
+
     loop {
         let message = "Hei fra plass nr. 9!";
 
@@ -29,7 +29,10 @@ pub fn udp(port: u32) -> std::io::Result<()> {
 
         let recieved_message = &buffer[0..amount];
 
-        println!("Mottok melding: {}", std::str::from_utf8(recieved_message).unwrap());
+        println!(
+            "Mottok melding: {}",
+            std::str::from_utf8(recieved_message).unwrap()
+        );
 
         sleep(Duration::from_millis(1000));
     }

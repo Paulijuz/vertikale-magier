@@ -25,4 +25,4 @@ pub fn tcp() -> std::io::Result<()> {
 
         sleep(Duration::from_secs(1));
     }
-} // the stream is closed here
+}

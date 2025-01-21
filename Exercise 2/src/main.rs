@@ -1,7 +1,6 @@
 mod tcp;
 
-fn main() -> std::io::Result<()>  {
-
+fn main() -> std::io::Result<()> {
     tcp::tcp()?;
 
     return Ok(());

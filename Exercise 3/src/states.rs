@@ -4,12 +4,17 @@ const NUMBER_OF_FLOORS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum States {
-    Idle, Moving, DoorOpen, OutOfOrder
+    Idle,
+    Moving,
+    DoorOpen,
+    OutOfOrder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
-    Up, Down, Stopped,
+    Up,
+    Down,
+    Stopped,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -33,8 +38,12 @@ impl Elevator {
             state: States::Idle,
             direction: Direction::Stopped,
             floor: 0,
-            orders: [Order { outside_call_down: false, outside_call_up: false, inside_call: false }; NUMBER_OF_FLOORS],
-        }
+            orders: [Order {
+                outside_call_down: false,
+                outside_call_up: false,
+                inside_call: false,
+            }; NUMBER_OF_FLOORS],
+        };
     }
     pub fn orders_below(&self) -> bool {
         self.orders[..self.floor as usize]
@@ -50,16 +59,19 @@ impl Elevator {
         let order = self.orders[self.floor as usize];
         order.inside_call || order.outside_call_down || order.outside_call_up
     }
-    pub fn should_stop(&self) -> bool { // TODO: Logikken for om en hei bør stoppe burde kanskje ligge i en egen fil
+    pub fn should_stop(&self) -> bool {
+        // TODO: Logikken for om en hei bør stoppe burde kanskje ligge i en egen fil
         match self.direction {
-            Direction::Down => return 
-                self.orders[self.floor as usize].outside_call_down ||
-                self.orders[self.floor as usize].inside_call ||
-                !self.orders_below(),
-            Direction::Up => return 
-                self.orders[self.floor as usize].outside_call_up ||
-                self.orders[self.floor as usize].inside_call ||
-                !self.orders_above(),
+            Direction::Down => {
+                return self.orders[self.floor as usize].outside_call_down
+                    || self.orders[self.floor as usize].inside_call
+                    || !self.orders_below()
+            }
+            Direction::Up => {
+                return self.orders[self.floor as usize].outside_call_up
+                    || self.orders[self.floor as usize].inside_call
+                    || !self.orders_above()
+            }
             _ => return true,
         }
     }

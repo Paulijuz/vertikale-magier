@@ -3,7 +3,8 @@ use std::thread::{spawn, sleep};
 
 use crossbeam_channel as cbc;
 
-pub fn start_timer(duration: Duration, channel: &cbc::Sender<()>) {    
+// TODO: Legg til kommentarer til hver funksjon
+pub fn start_timer(duration: Duration, channel: &cbc::Sender<()>) {
     let channel = channel.clone();
     
     spawn(move || {

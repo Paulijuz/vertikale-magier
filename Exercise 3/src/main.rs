@@ -7,7 +7,7 @@ use std::time::Duration;
 use crossbeam_channel::{self as cbc, Sender};
 
 use driver_rust::elevio::elev::{self as e, DIRN_DOWN, DIRN_STOP, DIRN_UP}; // TODO: Ikke importer som e
-use states::{Direction, Elevator, States};
+use states::{Direction, Elevator, States, OrderArray};
 
 fn choose_direction(elevator: &Elevator) -> (Direction, States) {
     // TODO: Flytte ut fra main
@@ -45,6 +45,16 @@ fn choose_direction(elevator: &Elevator) -> (Direction, States) {
                 (Direction::Stopped, States::Idle)
             }
         }
+    }
+}
+
+fn sync_lights(elevator: &e::Elevator, orders: &OrderArray) {
+    for (floor, order) in orders.iter().enumerate() {
+        let floor = floor as u8;
+
+        elevator.call_button_light(floor, 0, order.outside_call_up);
+        elevator.call_button_light(floor, 1, order.outside_call_down);
+        elevator.call_button_light(floor, 2, order.inside_call);
     }
 }
 
@@ -92,7 +102,6 @@ fn main() -> std::io::Result<()> {
             recv(rx_channels.call_button_rx) -> a => { // TODO: Gi alle variablene "a" et bedre navn kanskje
                 let call_button = a.unwrap();
                 println!("{:#?}", call_button);
-                elevio_elevator.call_button_light(call_button.floor, call_button.call, true);
 
                 match call_button.call {
                     0 => {
@@ -109,6 +118,8 @@ fn main() -> std::io::Result<()> {
                     }
                 }
 
+                sync_lights(&elevio_elevator, &elevator.orders);
+
                 match elevator.state {
                     States::Idle => {
                         start_moving(&mut elevator, &elevio_elevator, &timer_channel_tx);
@@ -122,15 +133,19 @@ fn main() -> std::io::Result<()> {
 
                 elevator.floor = floor;
 
+                elevio_elevator.floor_indicator(floor);
+
                 match elevator.state {
                     States::Moving => {
                         if elevator.should_stop() {
                             println!("Stopping!");
                             elevator.state = States::DoorOpen;
+                            elevio_elevator.door_light(true);
                             elevator.clear_orders_here();
+                            sync_lights(&elevio_elevator, &elevator.orders);
                             elevio_elevator.motor_direction(DIRN_STOP);
 
-                            timer::start_timer(Duration::from_secs(1), &timer_channel_tx);
+                            timer::start_timer(Duration::from_secs(3), &timer_channel_tx);
                         }
                     },
                     _ => {},
@@ -139,6 +154,8 @@ fn main() -> std::io::Result<()> {
             recv(rx_channels.stop_button_rx) -> a => {
                 let stop = a.unwrap();
                 println!("Stop button: {:#?}", stop);
+                
+                elevio_elevator.motor_direction(DIRN_STOP);
 
                 match elevator.state {
                     _ => {
@@ -150,19 +167,18 @@ fn main() -> std::io::Result<()> {
                 let obstr = a.unwrap();
                 println!("Obstruction: {:#?}", obstr);
 
-                match elevator.state {
-
-                    States::DoorOpen => {
-                        // Ikke lukk dør
-                    },
-                    _ => {
-
-                    },
-                }
+                elevator.obstruction = obstr;
             },
             recv(timer_channel_rx) -> _ => {
-                println!("Door close!");
-                start_moving(&mut elevator, &elevio_elevator, &timer_channel_tx);
+                if elevator.obstruction {
+                    timer::start_timer(Duration::from_secs(3), &timer_channel_tx);
+                } else {
+                    println!("Door close!");
+
+                    elevio_elevator.door_light(false);
+
+                    start_moving(&mut elevator, &elevio_elevator, &timer_channel_tx);
+                }
             }
         }
     }

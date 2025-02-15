@@ -15,7 +15,7 @@ const BACKLOG_SIZE: i32 = 128;
 pub struct Client {
     socket: Socket,
     sender: Option<Sender<String>>,
-    receiver: Receiver<String>,
+    receiver: Receiver<(SockAddr, String)>,
     sender_thread: Option<JoinHandle<()>>,
     receiver_thread: Option<JoinHandle<()>>,
 }
@@ -43,13 +43,16 @@ impl Client {
 
         let send_address = send_address.clone();
 
-        let (receive_channel_tx, receive_channel_rx) = unbounded::<String>();
+        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SockAddr, String)>();
         let (send_channel_tx, send_channel_rx) = unbounded::<String>();
 
         let receive_thread_handle = spawn(move || loop {
-            let mut buf = [0; BUFFER_SIZE];
+            let mut buffer = [0; BUFFER_SIZE];
 
-            let Ok(count) = receive_socket.read(&mut buf) else {
+            let (Ok(address), Ok(count)) = (
+                receive_socket.peek_sender(),
+                receive_socket.read(&mut buffer),
+            ) else {
                 break;
             };
 
@@ -57,8 +60,8 @@ impl Client {
                 break;
             }
 
-            let data = String::from_utf8_lossy(&buf[..count]);
-            receive_channel_tx.send(data.into()).unwrap();
+            let data = String::from_utf8_lossy(&buffer[..count]);
+            receive_channel_tx.send((address, data.into())).unwrap();
         });
 
         let send_thread_handle = spawn(move || loop {
@@ -100,13 +103,12 @@ impl Client {
     pub fn sender(&self) -> &Sender<String> {
         self.sender.as_ref().unwrap()
     }
-    pub fn receiver(&self) -> &Receiver<String> {
+    pub fn receiver(&self) -> &Receiver<(SockAddr, String)> {
         &self.receiver
     }
 }
 
 pub struct Host {
-    pub port: u16,
     socket: Socket,
     sender: Option<Sender<(u32, String)>>,
     receiver: Receiver<(u32, String)>,
@@ -121,8 +123,6 @@ impl Host {
         let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
         socket.bind(&address.into()).unwrap();
         socket.listen(BACKLOG_SIZE).unwrap();
-
-        let port = socket.local_addr().unwrap().as_socket().unwrap().port();
 
         let (new_client_channel_tx, new_client_channel_rx) = unbounded::<(SockAddr, Client)>();
         let (receive_channel_tx, receive_channel_rx) = unbounded::<(u32, String)>();
@@ -166,7 +166,7 @@ impl Host {
                     }
                     default => {
                         for (id, client) in &clients {
-                            let Ok(data) = client.receiver().try_recv() else { continue; };
+                            let Ok((_, data)) = client.receiver().try_recv() else { continue; };
                             receive_channel_tx.send((*id, data)).unwrap();
                         }
                         sleep(Duration::from_millis(10));
@@ -176,7 +176,6 @@ impl Host {
         });
 
         Host {
-            port,
             socket,
             sender: Some(send_channel_tx),
             receiver: receive_channel_rx,
@@ -189,6 +188,14 @@ impl Host {
     }
     pub fn receiver(&self) -> &Receiver<(u32, String)> {
         &self.receiver
+    }
+    pub fn port(&self) -> u16 {
+        self.socket
+            .local_addr()
+            .unwrap()
+            .as_socket()
+            .unwrap()
+            .port()
     }
 }
 

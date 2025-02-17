@@ -2,9 +2,9 @@ use super::socket;
 use crate::timer::Timer;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use rand::{distr::Alphanumeric, Rng};
-use socket2::SockAddr;
 use std::{
-    thread::{self, JoinHandle},
+    net::SocketAddrV4,
+    thread::{spawn, JoinHandle},
     time::Duration,
 };
 
@@ -22,17 +22,17 @@ enum AdvertiserCommand {
 
 pub struct Advertiser {
     control_channel_tx: Sender<AdvertiserCommand>,
-    receive_channel_rx: Receiver<(SockAddr, String)>,
+    receive_channel_rx: Receiver<(SocketAddrV4, String)>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Advertiser {
     pub fn init(advertisment: &String) -> Self {
         let (control_channel_tx, control_channel_rx) = unbounded::<AdvertiserCommand>();
-        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SockAddr, String)>();
+        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, String)>();
 
         let advertisment = advertisment.clone();
-        let thread = Some(thread::spawn(move || {
+        let thread = Some(spawn(move || {
             run_advertiser(advertisment, control_channel_rx, receive_channel_tx)
         }));
 
@@ -55,7 +55,7 @@ impl Advertiser {
             .unwrap();
     }
 
-    pub fn receive_channel(&self) -> &Receiver<(SockAddr, String)> {
+    pub fn receive_channel(&self) -> &Receiver<(SocketAddrV4, String)> {
         &self.receive_channel_rx
     }
 }
@@ -80,7 +80,7 @@ fn generate_advertiser_id() -> String {
 fn run_advertiser(
     mut advertisment: String,
     control_channel_rx: Receiver<AdvertiserCommand>,
-    receive_channel_tx: Sender<(SockAddr, String)>,
+    receive_channel_tx: Sender<(SocketAddrV4, String)>,
 ) {
     let id: String = generate_advertiser_id();
     advertisment.insert_str(0, &id);

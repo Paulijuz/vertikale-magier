@@ -1,19 +1,20 @@
-use super::{advertiser::Advertiser, socket::Host};
+use super::{
+    advertiser::Advertiser,
+    socket::{Client, Host},
+};
+use crossbeam_channel::{never, select};
 use log::warn;
-use petname::Generator;
 use std::{
-    net::SocketAddr,
-    str::FromStr,
+    net::{SocketAddr, SocketAddrV4},
     thread::{spawn, JoinHandle},
 };
 
 enum Role {
-    Master,
-    Slave,
+    Master(Host),
+    Slave(Client),
 }
 
 pub struct Node {
-    role: Role,
     thread: JoinHandle<()>,
 }
 
@@ -21,10 +22,7 @@ impl Node {
     pub fn init() -> Self {
         let thread = spawn(move || run_node());
 
-        Node {
-            role: Role::Master,
-            thread,
-        }
+        Node { thread }
     }
 
     pub fn status_channel(&self) {}
@@ -38,27 +36,76 @@ fn run_node() {
     let host = Host::new_tcp_host(None);
     let port = host.port();
 
-    let advertisment = format!("MASTER: {port}");
+    let advertisment: String = format!("MASTER: {port}");
     let advertiser = Advertiser::init(&advertisment);
     advertiser.start_advertising();
 
+    let mut role = Role::Master(host);
+
     loop {
-        let (address, data) = advertiser.receive_channel().recv().unwrap();
-
-        let Some(port) = data.strip_prefix("MASTER: ") else {
-            println!("Received garbage: {data}");
-            continue;
+        let from_slaves_channel = match &role {
+            Role::Master(host) => host.receiver(),
+            _ => &never(),
         };
 
-        let Ok(port) = port.parse::<u16>() else {
-            warn!("Received invalid port: {port}");
-            continue;
+        let from_master_channel = match &role {
+            Role::Slave(client) => client.receiver(),
+            _ => &never(),
         };
+        
+        select! {
+            recv(advertiser.receive_channel()) -> advertisment => {
+                let (address, data) = advertisment.unwrap();
 
-        let master_address = SocketAddr::new(address.as_socket().unwrap().ip(), port);
+                // TODO: This should be part of the advertiser/socket modules:
+                let Some(port) = data.strip_prefix("MASTER: ") else {
+                    println!("Received garbage: {data}");
+                    continue;
+                };
 
-        println!("Found a master node: {master_address}");
+                let Ok(port) = port.parse::<u16>() else {
+                    warn!("Received invalid port: {port}");
+                    continue;
+                };
 
-        // advertiser.stop_advertising();
+                let master_address = SocketAddrV4::new(*address.ip(), port);
+
+                match &role {
+                    Role::Master(_) => {
+                        println!("Found another master node: {master_address}");
+
+                        advertiser.stop_advertising();
+
+                        role = Role::Slave(
+                            Client::new_tcp_client(address.ip().octets(), port)
+                        );
+
+                        println!("Successfully connected!");
+                    },
+                    _ => {},
+                }
+            },
+            recv(from_slaves_channel) -> message => {
+                let (address, data) = message.unwrap();
+                
+                println!("Received data from slave ({address}): {data}");
+            },
+            recv(from_master_channel) -> message => {
+                let Ok((_, data)) = message else {
+                    let host = Host::new_tcp_host(None);
+
+                    role = Role::Master(host);
+
+                    println!("Master disconnected!");
+                    continue;
+                };
+
+                println!("Received data from master: {data}");
+            }
+        }
     }
 }
+
+fn run_node_slave() {}
+
+fn run_node_master() {}

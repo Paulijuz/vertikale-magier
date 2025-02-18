@@ -17,6 +17,7 @@ const ADVERTISER_ID_LENGTH: usize = 16;
 enum AdvertiserCommand {
     Start,
     Stop,
+    SetAdvertisment(String),
     Exit,
 }
 
@@ -31,7 +32,7 @@ impl Advertiser {
         let (control_channel_tx, control_channel_rx) = unbounded::<AdvertiserCommand>();
         let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, String)>();
 
-        let advertisment = advertisment.clone();
+        let advertisment = advertisment.to_owned();
         let thread = Some(spawn(move || {
             run_advertiser(advertisment, control_channel_rx, receive_channel_tx)
         }));
@@ -52,6 +53,12 @@ impl Advertiser {
     pub fn stop_advertising(&self) {
         self.control_channel_tx
             .send(AdvertiserCommand::Stop)
+            .unwrap();
+    }
+
+    pub fn set_advertisment(&self, advertisment: &String) {
+        self.control_channel_tx
+            .send(AdvertiserCommand::SetAdvertisment(advertisment.to_owned()))
             .unwrap();
     }
 
@@ -86,20 +93,27 @@ fn run_advertiser(
     advertisment.insert_str(0, &id);
 
     let client = socket::Client::new_multicast_client(ADVERTISING_IP, ADVERTISING_PORT);
-    let timer = Timer::init();
+    let mut timer = Timer::init();
     let mut is_advertising = false;
 
     loop {
         select! {
             recv(control_channel_rx) -> command => {
                 match command.unwrap() {
-                    AdvertiserCommand::Start if !is_advertising => {
+                    AdvertiserCommand::Start => {
+                        if is_advertising {
+                            continue;
+                        }
+                        
                         is_advertising = true;
-                        timer.trigger();
+                        timer.start(ADVERTISING_INTERVAL);
                     },
                     AdvertiserCommand::Stop => is_advertising = false,
+                    AdvertiserCommand::SetAdvertisment(new_advertisment) => {
+                        advertisment = new_advertisment;
+                        advertisment.insert_str(0, &id);
+                    },
                     AdvertiserCommand::Exit => break,
-                    _ => {},
                 }
             }
             recv(timer.timeout_channel()) -> _ => {

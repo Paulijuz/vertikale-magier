@@ -6,7 +6,8 @@ use crossbeam_channel::{never, select};
 use log::warn;
 use std::{
     net::{SocketAddr, SocketAddrV4},
-    thread::{spawn, JoinHandle},
+    thread::{sleep, spawn, JoinHandle},
+    time::Duration,
 };
 
 enum Role {
@@ -55,6 +56,8 @@ fn run_node() {
         
         select! {
             recv(advertiser.receive_channel()) -> advertisment => {
+                println!("\nAdvertisment recieved!");
+
                 let (address, data) = advertisment.unwrap();
 
                 // TODO: This should be part of the advertiser/socket modules:
@@ -73,26 +76,41 @@ fn run_node() {
                 match &role {
                     Role::Master(_) => {
                         println!("Found another master node: {master_address}");
-
                         advertiser.stop_advertising();
 
-                        role = Role::Slave(
-                            Client::new_tcp_client(address.ip().octets(), port)
-                        );
+                        println!("Waiting to connect!");
+                        sleep(Duration::from_millis(rand::random_range(0..=100)));
 
-                        println!("Successfully connected!");
+                        if let Ok(client) = Client::new_tcp_client(address.ip().octets(), port) {
+                            println!("Successfully connected!");
+                            role = Role::Slave(client);
+                            continue;
+                        }
+
+                        println!("Could not connect to master.");
+                        advertiser.start_advertising();
                     },
                     _ => {},
                 }
             },
             recv(from_slaves_channel) -> message => {
+                println!("\nData from slave recieved!");
+
                 let (address, data) = message.unwrap();
                 
                 println!("Received data from slave ({address}): {data}");
             },
             recv(from_master_channel) -> message => {
+                println!("\nData from master recieved!");
+
                 let Ok((_, data)) = message else {
+                    println!("Master dead");
+
                     let host = Host::new_tcp_host(None);
+                    let port = host.port();
+
+                    advertiser.set_advertisment(&format!("MASTER: {port}"));
+                    advertiser.start_advertising();
 
                     role = Role::Master(host);
 
@@ -105,7 +123,3 @@ fn run_node() {
         }
     }
 }
-
-fn run_node_slave() {}
-
-fn run_node_master() {}

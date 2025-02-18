@@ -3,7 +3,7 @@ use log::warn;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     collections::HashMap,
-    io::{ErrorKind, Read},
+    io::{ErrorKind, Read, Result},
     net::{Ipv4Addr, Shutdown, SocketAddr, SocketAddrV4},
     thread::{sleep, spawn, JoinHandle},
     time::Duration,
@@ -39,9 +39,9 @@ impl Drop for Client {
 impl Client {
     fn init(socket: Socket, send_address: &SocketAddrV4) -> Self {
         let mut receive_socket = socket.try_clone().unwrap();
-        let send_socket: Socket = socket.try_clone().unwrap();
+        let send_socket = socket.try_clone().unwrap();
 
-        let send_address = send_address.clone();
+        let send_address = send_address.to_owned();
 
         let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, String)>();
         let (send_channel_tx, send_channel_rx) = unbounded::<String>();
@@ -96,14 +96,14 @@ impl Client {
 
         Client::init(socket, &address)
     }
-    pub fn new_tcp_client(host_ip: [u8; 4], port: u16) -> Self {
+    pub fn new_tcp_client(host_ip: [u8; 4], port: u16) -> Result<Self> {
         let host_ip = Ipv4Addr::from(host_ip);
         let address = SocketAddrV4::new(host_ip, port);
 
         let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
-        socket.connect(&address.into()).unwrap(); // TODO: Gracefully handle!
+        socket.connect(&address.into())?;
 
-        Client::init(socket, &address)
+        Ok(Client::init(socket, &address))
     }
     pub fn sender(&self) -> &Sender<String> {
         self.sender.as_ref().unwrap()

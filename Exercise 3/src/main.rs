@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use crossbeam_channel::{self as cbc, Sender};
 
-use driver_rust::elevio::elev::{self as e, DIRN_DOWN, DIRN_STOP, DIRN_UP};
+use driver_rust::elevio::elev::{self as e, DIRN_DOWN, DIRN_STOP, DIRN_UP}; // TODO: Ikke importer som e
 use states::{Direction, Elevator, States};
 
-fn choose_direction(elevator: &Elevator) -> (Direction, States) {
+fn choose_direction(elevator: &Elevator) -> (Direction, States) { // TODO: Flytte ut fra main
     match elevator.direction {    
         Direction::Up => {
             return 
@@ -42,7 +42,7 @@ fn start_moving(elevator: &mut Elevator, elevio_elevator: &e::Elevator, timer_ch
 
     if state == States::DoorOpen {
         println!("Stopping in move!");
-        elevator.clear_order_here();
+        elevator.clear_orders_here();
         timer::start_timer(Duration::from_secs(3), &timer_channel_tx);
     }
 
@@ -63,7 +63,7 @@ fn start_moving(elevator: &mut Elevator, elevio_elevator: &e::Elevator, timer_ch
 
 fn main() -> std::io::Result<()> {
     let elev_num_floors = 4;
-    let elevio_elevator = e::Elevator::init("localhost:15657", elev_num_floors)?;
+    let elevio_elevator = e::Elevator::init("localhost:15657", elev_num_floors)?; // TODO: Slå sammen elevio_elevator og elevator kanskje?
     println!("Elevator started:\n{:#?}", elevio_elevator);
 
     let (timer_channel_tx, timer_channel_rx) = cbc::unbounded::<()>();
@@ -71,8 +71,8 @@ fn main() -> std::io::Result<()> {
     let mut elevator = states::Elevator::init();
 
     loop {
-        cbc::select! {
-            recv(rx_channels.call_button_rx) -> a => {
+        cbc::select! { // TODO: Denne logikken bør flyttes til en egen fil
+            recv(rx_channels.call_button_rx) -> a => { // TODO: Gi alle variablene "a" et bedre navn kanskje
                 let call_button = a.unwrap();
                 println!("{:#?}", call_button);
                 elevio_elevator.call_button_light(call_button.floor, call_button.call, true);
@@ -110,7 +110,7 @@ fn main() -> std::io::Result<()> {
                         if elevator.should_stop() {
                             println!("Stopping!");
                             elevator.state = States::DoorOpen;
-                            elevator.clear_order_here();
+                            elevator.clear_orders_here();
                             elevio_elevator.motor_direction(DIRN_STOP);
                             
                             timer::start_timer(Duration::from_secs(1), &timer_channel_tx);

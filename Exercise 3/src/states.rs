@@ -1,11 +1,13 @@
+// TODO: Denne filen kan få et bedre navn
+
 const NUMBER_OF_FLOORS: usize = 4;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum States {
     Idle, Moving, DoorOpen, OutOfOrder
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Up, Down, Stopped,
 }
@@ -18,11 +20,11 @@ pub struct Order {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Elevator{
+pub struct Elevator {
     pub state: States,
     pub direction: Direction,
-    pub floor: u8,
-    pub orders: [Order; NUMBER_OF_FLOORS],
+    pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
+    pub orders: [Order; NUMBER_OF_FLOORS], // TODO: Kanskje ordere burde være lagret et annet sted enn på heisen
 }
 
 impl Elevator {
@@ -48,7 +50,7 @@ impl Elevator {
         let order = self.orders[self.floor as usize];
         order.inside_call || order.outside_call_down || order.outside_call_up
     }
-    pub fn should_stop(&self) -> bool {
+    pub fn should_stop(&self) -> bool { // TODO: Logikken for om en hei bør stoppe burde kanskje ligge i en egen fil
         match self.direction {
             Direction::Down => return 
                 self.orders[self.floor as usize].outside_call_down ||
@@ -61,7 +63,7 @@ impl Elevator {
             _ => return true,
         }
     }
-    pub fn clear_order_here(&mut self) {
+    pub fn clear_orders_here(&mut self) {
         self.orders[self.floor as usize].inside_call = false;
         self.orders[self.floor as usize].outside_call_down = false;
         self.orders[self.floor as usize].outside_call_up = false;

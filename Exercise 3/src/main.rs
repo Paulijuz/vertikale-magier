@@ -2,9 +2,10 @@ mod inputs;
 mod states;
 mod timer;
 
+use core::time;
 use std::time::Duration;
 
-use crossbeam_channel::{self as cbc, Sender};
+use crossbeam_channel as cbc;
 
 use driver_rust::elevio::elev::{self as e, DIRN_DOWN, DIRN_STOP, DIRN_UP}; // TODO: Ikke importer som e
 use states::{Direction, Elevator, States, OrderArray};
@@ -58,11 +59,8 @@ fn sync_lights(elevator: &e::Elevator, orders: &OrderArray) {
     }
 }
 
-fn start_moving(
-    elevator: &mut Elevator,
-    elevio_elevator: &e::Elevator,
-    timer_channel_tx: &Sender<()>,
-) {
+// TODO: Denne start moving funksjonen gjør sånn tre ulike ting. Denne burde forenkles
+fn start_moving(elevator: &mut Elevator, elevio_elevator: &e::Elevator, door_timer: &timer::Timer) {
     let (direction, state) = choose_direction(elevator);
 
     elevator.state = state;
@@ -70,7 +68,7 @@ fn start_moving(
     if state == States::DoorOpen {
         println!("Stopping in move!");
         elevator.clear_orders_here();
-        timer::start_timer(Duration::from_secs(3), &timer_channel_tx);
+        door_timer.start(Duration::from_secs(3));
     }
 
     match direction {
@@ -93,7 +91,7 @@ fn main() -> std::io::Result<()> {
     let elevio_elevator = e::Elevator::init("localhost:15657", elev_num_floors)?; // TODO: Slå sammen elevio_elevator og elevator kanskje?
     println!("Elevator started:\n{:#?}", elevio_elevator);
 
-    let (timer_channel_tx, timer_channel_rx) = cbc::unbounded::<()>();
+    let door_timer = timer::Timer::init();
     let rx_channels = inputs::get_input_channels(&elevio_elevator);
     let mut elevator = states::Elevator::init();
 
@@ -122,7 +120,7 @@ fn main() -> std::io::Result<()> {
 
                 match elevator.state {
                     States::Idle => {
-                        start_moving(&mut elevator, &elevio_elevator, &timer_channel_tx);
+                        start_moving(&mut elevator, &elevio_elevator, &door_timer);
                     },
                     _ => {},
                 }
@@ -145,7 +143,7 @@ fn main() -> std::io::Result<()> {
                             sync_lights(&elevio_elevator, &elevator.orders);
                             elevio_elevator.motor_direction(DIRN_STOP);
 
-                            timer::start_timer(Duration::from_secs(3), &timer_channel_tx);
+                            door_timer.start(Duration::from_secs(1));
                         }
                     },
                     _ => {},
@@ -169,15 +167,15 @@ fn main() -> std::io::Result<()> {
 
                 elevator.obstruction = obstr;
             },
-            recv(timer_channel_rx) -> _ => {
+            recv(door_timer.timeout_channel_rx) -> _ => {
                 if elevator.obstruction {
-                    timer::start_timer(Duration::from_secs(3), &timer_channel_tx);
+                    door_timer.start(time::Duration::from_secs(3));
                 } else {
                     println!("Door close!");
 
                     elevio_elevator.door_light(false);
 
-                    start_moving(&mut elevator, &elevio_elevator, &timer_channel_tx);
+                    start_moving(&mut elevator, &elevio_elevator, &door_timer);
                 }
             }
         }

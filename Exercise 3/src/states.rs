@@ -2,6 +2,8 @@
 
 const NUMBER_OF_FLOORS: usize = 4;
 
+pub type OrderArray = [Order; NUMBER_OF_FLOORS];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum States {
     Idle,
@@ -28,8 +30,9 @@ pub struct Order {
 pub struct Elevator {
     pub state: States,
     pub direction: Direction,
+    pub obstruction: bool,
     pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
-    pub orders: [Order; NUMBER_OF_FLOORS], // TODO: Kanskje ordere burde være lagret et annet sted enn på heisen
+    pub orders: OrderArray, // TODO: Kanskje ordere burde være lagret et annet sted enn på heisen
 }
 
 impl Elevator {
@@ -37,6 +40,7 @@ impl Elevator {
         return Elevator {
             state: States::Idle,
             direction: Direction::Stopped,
+            obstruction: false,
             floor: 0,
             orders: [Order {
                 outside_call_down: false,

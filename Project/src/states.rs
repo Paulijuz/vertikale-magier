@@ -4,6 +4,7 @@ const NUMBER_OF_FLOORS: usize = 4;
 
 pub type OrderArray = [Order; NUMBER_OF_FLOORS];
 
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum States {
     Idle,

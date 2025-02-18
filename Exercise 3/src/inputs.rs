@@ -1,14 +1,14 @@
+use crossbeam_channel as cbc;
 use std::thread::spawn;
 use std::time::Duration;
-use crossbeam_channel as cbc;
 
 use driver_rust::elevio;
 
 pub struct RxChannels {
-    pub call_button_rx: cbc::Receiver::<elevio::poll::CallButton>,
-    pub floor_sensor_rx: cbc::Receiver::<u8>,
-    pub stop_button_rx: cbc::Receiver::<bool>,
-    pub obstruction_rx: cbc::Receiver::<bool>,
+    pub call_button_rx: cbc::Receiver<elevio::poll::CallButton>,
+    pub floor_sensor_rx: cbc::Receiver<u8>,
+    pub stop_button_rx: cbc::Receiver<bool>,
+    pub obstruction_rx: cbc::Receiver<bool>,
 }
 
 pub fn get_input_channels(elevator: &elevio::elev::Elevator) -> RxChannels {
@@ -43,5 +43,5 @@ pub fn get_input_channels(elevator: &elevio::elev::Elevator) -> RxChannels {
         floor_sensor_rx,
         obstruction_rx,
         stop_button_rx,
-    }
+    };
 }

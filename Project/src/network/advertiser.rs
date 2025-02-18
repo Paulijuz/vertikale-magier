@@ -1,12 +1,13 @@
-use super::socket;
+use super::socket::{Client, SendableType};
 use crate::timer::Timer;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
-use rand::{distr::Alphanumeric, Rng};
+use rand::RngCore;
 use std::{
     net::SocketAddrV4,
     thread::{spawn, JoinHandle},
-    time::Duration,
+    time::Duration, u8,
 };
+use serde::{Serialize, Deserialize};
 
 const ADVERTISING_INTERVAL: Duration = Duration::from_secs(1);
 // Use port 52052 and 239.0.0.52 for group 52 <3
@@ -14,25 +15,30 @@ const ADVERTISING_IP: [u8; 4] = [239, 0, 0, 52];
 const ADVERTISING_PORT: u16 = 52052;
 const ADVERTISER_ID_LENGTH: usize = 16;
 
-enum AdvertiserCommand {
+#[derive(Serialize, Deserialize)]
+pub struct Advertisment<T: SendableType> {
+    sender_id: [u8; ADVERTISER_ID_LENGTH],
+    data: T,
+}
+
+enum AdvertiserCommand<T> {
     Start,
     Stop,
-    SetAdvertisment(String),
+    SetAdvertisment(T),
     Exit,
 }
 
-pub struct Advertiser {
-    control_channel_tx: Sender<AdvertiserCommand>,
-    receive_channel_rx: Receiver<(SocketAddrV4, String)>,
+pub struct Advertiser<T: SendableType> {
+    control_channel_tx: Sender<AdvertiserCommand<T>>,
+    receive_channel_rx: Receiver<(SocketAddrV4, Advertisment<T>)>,
     thread: Option<JoinHandle<()>>,
 }
 
-impl Advertiser {
-    pub fn init(advertisment: &String) -> Self {
-        let (control_channel_tx, control_channel_rx) = unbounded::<AdvertiserCommand>();
-        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, String)>();
+impl<T: SendableType> Advertiser<T> {
+    pub fn init(advertisment: T) -> Self {
+        let (control_channel_tx, control_channel_rx) = unbounded::<AdvertiserCommand<T>>();
+        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, Advertisment<T>)>();
 
-        let advertisment = advertisment.to_owned();
         let thread = Some(spawn(move || {
             run_advertiser(advertisment, control_channel_rx, receive_channel_tx)
         }));
@@ -56,18 +62,18 @@ impl Advertiser {
             .unwrap();
     }
 
-    pub fn set_advertisment(&self, advertisment: &String) {
+    pub fn set_advertisment(&self, advertisment: T) {
         self.control_channel_tx
-            .send(AdvertiserCommand::SetAdvertisment(advertisment.to_owned()))
+            .send(AdvertiserCommand::SetAdvertisment(advertisment))
             .unwrap();
     }
 
-    pub fn receive_channel(&self) -> &Receiver<(SocketAddrV4, String)> {
+    pub fn receive_channel(&self) -> &Receiver<(SocketAddrV4, Advertisment<T>)> {
         &self.receive_channel_rx
     }
 }
 
-impl Drop for Advertiser {
+impl<T: SendableType> Drop for Advertiser<T> {
     fn drop(&mut self) {
         self.control_channel_tx
             .send(AdvertiserCommand::Exit)
@@ -76,23 +82,24 @@ impl Drop for Advertiser {
     }
 }
 
-fn generate_advertiser_id() -> String {
-    rand::rng()
-        .sample_iter(Alphanumeric)
-        .take(ADVERTISER_ID_LENGTH)
-        .map(char::from)
-        .collect()
+fn generate_advertiser_id() -> [u8; ADVERTISER_ID_LENGTH] {
+    let mut buffer = [0; ADVERTISER_ID_LENGTH];
+    rand::rng().fill_bytes(&mut buffer);
+    return buffer;
 }
 
-fn run_advertiser(
-    mut advertisment: String,
-    control_channel_rx: Receiver<AdvertiserCommand>,
-    receive_channel_tx: Sender<(SocketAddrV4, String)>,
+fn run_advertiser<T: SendableType>(
+    mut advertisment_data: T,
+    control_channel_rx: Receiver<AdvertiserCommand<T>>,
+    receive_channel_tx: Sender<(SocketAddrV4, Advertisment<T>)>,
 ) {
-    let id: String = generate_advertiser_id();
-    advertisment.insert_str(0, &id);
 
-    let client = socket::Client::new_multicast_client(ADVERTISING_IP, ADVERTISING_PORT);
+    let advertisment = Advertisment {
+        sender_id: generate_advertiser_id(),
+        data: advertisment_data,
+    };
+
+    let client: Client<Advertisment<T>> = Client::new_multicast_client(ADVERTISING_IP, ADVERTISING_PORT);
     let mut timer = Timer::init();
     let mut is_advertising = false;
 
@@ -109,13 +116,15 @@ fn run_advertiser(
                         timer.start(ADVERTISING_INTERVAL);
                     },
                     AdvertiserCommand::Stop => is_advertising = false,
-                    AdvertiserCommand::SetAdvertisment(new_advertisment) => {
-                        advertisment = new_advertisment;
-                        advertisment.insert_str(0, &id);
+                    AdvertiserCommand::SetAdvertisment(new_advertisment_data) => {
+                        advertisment = Advertisment {
+                            sender_id: generate_advertiser_id(),
+                            data: new_advertisment_data,
+                        };
                     },
                     AdvertiserCommand::Exit => break,
                 }
-            }
+            },
             recv(timer.timeout_channel()) -> _ => {
                 if !is_advertising {
                     continue;
@@ -123,19 +132,16 @@ fn run_advertiser(
 
                 client.sender().send(advertisment.clone()).unwrap();
                 timer.start(ADVERTISING_INTERVAL);
-            }
+            },
             recv(client.receiver()) -> data => {
-                let (address, data) = data.unwrap();
+                let (address, adv) = data.unwrap();
 
-                let received_id = data[..ADVERTISER_ID_LENGTH].to_string();
-                let received_advertisment = data[ADVERTISER_ID_LENGTH..].to_string();
-
-                if received_id == id {
+                if adv.sender == id {
                     continue;
                 }
 
                 receive_channel_tx.send((address, received_advertisment)).unwrap();
-            }
+            },
         }
     }
 }

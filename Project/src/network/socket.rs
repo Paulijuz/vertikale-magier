@@ -1,5 +1,6 @@
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use log::warn;
+use serde::{de, Serialize};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     collections::HashMap,
@@ -12,21 +13,25 @@ use std::{
 const BUFFER_SIZE: usize = 1024;
 const BACKLOG_SIZE: i32 = 128;
 
-pub struct Client {
+pub trait SendableType: Serialize + de::DeserializeOwned + Send + 'static {}
+
+impl<T: Serialize + de::DeserializeOwned + Send + 'static> SendableType for T {}
+
+pub struct Client<T: SendableType> {
     socket: Socket,
-    sender: Option<Sender<String>>,
-    receiver: Receiver<(SocketAddrV4, String)>,
+    sender: Option<Sender<T>>,
+    receiver: Receiver<(SocketAddrV4, T)>,
     sender_thread: Option<JoinHandle<()>>,
     receiver_thread: Option<JoinHandle<()>>,
 }
 
-impl Drop for Client {
+impl<T: SendableType> Drop for Client<T> {
     fn drop(&mut self) {
         self.socket
             .shutdown(Shutdown::Both)
             .unwrap_or_else(|error| {
                 if error.kind() != ErrorKind::NotConnected {
-                    panic!("{error:?}");
+                    panic!("Could not shutdown socket: {error:?}");
                 }
             });
         drop(self.sender.take().unwrap());
@@ -36,15 +41,15 @@ impl Drop for Client {
     }
 }
 
-impl Client {
+impl<T: SendableType> Client<T> {
     fn init(socket: Socket, send_address: &SocketAddrV4) -> Self {
         let mut receive_socket = socket.try_clone().unwrap();
         let send_socket = socket.try_clone().unwrap();
 
         let send_address = send_address.to_owned();
 
-        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, String)>();
-        let (send_channel_tx, send_channel_rx) = unbounded::<String>();
+        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, T)>();
+        let (send_channel_tx, send_channel_rx) = unbounded::<T>();
 
         let receive_thread_handle = spawn(move || loop {
             let mut buffer = [0; BUFFER_SIZE];
@@ -61,7 +66,10 @@ impl Client {
             }
 
             let address = address.as_socket_ipv4().unwrap();
-            let data = String::from_utf8_lossy(&buffer[..count]);
+            let Ok(data) = serde_json::from_slice::<T>(&buffer[..count]) else {
+                warn!("Could not deserialize received data!");
+                continue;
+            };
 
             receive_channel_tx.send((address, data.into())).unwrap();
         });
@@ -70,8 +78,13 @@ impl Client {
             let Ok(data) = send_channel_rx.recv() else {
                 break;
             };
+
+            let Ok(buffer) = serde_json::to_vec(&data) else {
+                panic!("Could not serialize data!");
+            };
+
             send_socket
-                .send_to(data.as_bytes(), &send_address.into())
+                .send_to(&buffer, &send_address.into())
                 .unwrap();
         });
 
@@ -105,23 +118,23 @@ impl Client {
 
         Ok(Client::init(socket, &address))
     }
-    pub fn sender(&self) -> &Sender<String> {
+    pub fn sender(&self) -> &Sender<T> {
         self.sender.as_ref().unwrap()
     }
-    pub fn receiver(&self) -> &Receiver<(SocketAddrV4, String)> {
+    pub fn receiver(&self) -> &Receiver<(SocketAddrV4, T)> {
         &self.receiver
     }
 }
 
-pub struct Host {
+pub struct Host<T: SendableType> {
     socket: Socket,
-    sender: Option<Sender<(SocketAddrV4, String)>>,
-    receiver: Receiver<(SocketAddrV4, String)>,
+    sender: Option<Sender<(SocketAddrV4, T)>>,
+    receiver: Receiver<(SocketAddrV4, T)>,
     accept_thread_handle: Option<JoinHandle<()>>,
     serve_thread_handle: Option<JoinHandle<()>>,
 }
 
-impl Host {
+impl<T: SendableType> Host<T> {
     pub fn new_tcp_host(port: Option<u16>) -> Self {
         let address = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port.unwrap_or(0)));
 
@@ -129,9 +142,9 @@ impl Host {
         socket.bind(&address.into()).unwrap();
         socket.listen(BACKLOG_SIZE).unwrap();
 
-        let (new_client_channel_tx, new_client_channel_rx) = unbounded::<(SocketAddrV4, Client)>();
-        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, String)>();
-        let (send_channel_tx, send_channel_rx) = unbounded::<(SocketAddrV4, String)>();
+        let (new_client_channel_tx, new_client_channel_rx) = unbounded::<(SocketAddrV4, Client<T>)>();
+        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, T)>();
+        let (send_channel_tx, send_channel_rx) = unbounded::<(SocketAddrV4, T)>();
 
         let accept_socket: Socket = socket.try_clone().unwrap();
         let accept_thread_handle = spawn(move || loop {
@@ -148,7 +161,7 @@ impl Host {
         });
 
         let serve_thread_handle = spawn(move || {
-            let mut clients: HashMap<SocketAddrV4, Client> = HashMap::new();
+            let mut clients: HashMap<SocketAddrV4, Client<T>> = HashMap::new();
 
             loop {
                 select! {
@@ -184,10 +197,10 @@ impl Host {
             serve_thread_handle: Some(serve_thread_handle),
         }
     }
-    pub fn sender(&self) -> &Sender<(SocketAddrV4, String)> {
+    pub fn sender(&self) -> &Sender<(SocketAddrV4, T)> {
         self.sender.as_ref().unwrap()
     }
-    pub fn receiver(&self) -> &Receiver<(SocketAddrV4, String)> {
+    pub fn receiver(&self) -> &Receiver<(SocketAddrV4, T)> {
         &self.receiver
     }
     pub fn port(&self) -> u16 {
@@ -200,7 +213,7 @@ impl Host {
     }
 }
 
-impl Drop for Host {
+impl<T: SendableType> Drop for Host<T> {
     fn drop(&mut self) {
         self.socket.shutdown(Shutdown::Both).unwrap();
         drop(self.sender.take().unwrap());

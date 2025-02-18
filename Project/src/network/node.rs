@@ -1,6 +1,6 @@
 use super::{
     advertiser::Advertiser,
-    socket::{Client, Host},
+    socket::{Client, Host, SendableType},
 };
 use crossbeam_channel::{never, select};
 use log::warn;
@@ -10,9 +10,9 @@ use std::{
     time::Duration,
 };
 
-enum Role {
-    Master(Host),
-    Slave(Client),
+enum Role<T: SendableType> {
+    Master(Host<T>),
+    Slave(Client<T>),
 }
 
 pub struct Node {
@@ -34,7 +34,7 @@ impl Node {
 }
 
 fn run_node() {
-    let host = Host::new_tcp_host(None);
+    let host: Host<String> = Host::new_tcp_host(None);
     let port = host.port();
 
     let advertisment: String = format!("MASTER: {port}");
@@ -56,18 +56,16 @@ fn run_node() {
         
         select! {
             recv(advertiser.receive_channel()) -> advertisment => {
-                println!("\nAdvertisment recieved!");
-
                 let (address, data) = advertisment.unwrap();
 
                 // TODO: This should be part of the advertiser/socket modules:
                 let Some(port) = data.strip_prefix("MASTER: ") else {
-                    println!("Received garbage: {data}");
+                    println!("\nReceived garbage: {data}");
                     continue;
                 };
 
                 let Ok(port) = port.parse::<u16>() else {
-                    warn!("Received invalid port: {port}");
+                    warn!("\nReceived invalid port: {port}");
                     continue;
                 };
 
@@ -75,7 +73,7 @@ fn run_node() {
 
                 match &role {
                     Role::Master(_) => {
-                        println!("Found another master node: {master_address}");
+                        println!("\nFound another master node: {master_address}");
                         advertiser.stop_advertising();
 
                         println!("Waiting to connect!");

@@ -1,30 +1,35 @@
-use std::net::UdpSocket;
-use std::net::SocketAddrV4;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-use std::thread;
-use std::{net::{ TcpListener, TcpStream},io::{Read, Write}};
-use log::{info, error, warn};
-use serde::{Serialize, Deserialize};
-use crossbeam_channel::{select};
+use core::fmt;
+use crossbeam_channel as cbc;
+use crossbeam_channel::select;
+use driver_rust::elevio;
+use log::{error, info};
+use serde::{Deserialize, Serialize};
+use std::array;
 use std::collections::{HashMap, HashSet};
+use std::net::SocketAddrV4;
 
 use crate::elevator_controller::NUMBER_OF_FLOORS;
-use crate::network::socket::{Host, Client};
-use crate::elevator_controller::Order;
-use crate::elevator_controller::{ States, Direction, ElevatorOrders};
+use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorOrders, Order};
+use crate::inputs;
+use crate::network::advertiser::Advertiser;
+use crate::network::socket::{Client, Host};
 
-
-const ADVERTISMENT_PORT: u16 = 52000;
-const HOST_PORT: u16 = 44638;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleElevatorState {
-    pub id: u8,
+    pub name: String,
     pub direction: Direction,
     pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
+}
+
+impl fmt::Display for SingleElevatorState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "Navn: {}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger: {:?}",
+            self.name, self.direction, self.floor, self.cab_requests
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)] //gir enumen den tilgangen (må stå over hver enum)
@@ -36,46 +41,70 @@ enum ElevatorRole {
 
 // MasterState: Holder oversikt over alle heiser og bestillinger
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum HallRequestState {
     Inactive,
     Requested,
-    Assigned(u8),
+    Assigned(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-struct HallRequest {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HallRequest {
     up: HallRequestState,
     down: HallRequestState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllElevatorStates {
-    pub elevators: HashMap<u8, SingleElevatorState>,   //Liste over alle aktive heiser
+    pub elevators: HashMap<String, SingleElevatorState>, //Liste over alle aktive heiser
     pub hall_requests: [HallRequest; NUMBER_OF_FLOORS],
 }
+
+impl fmt::Display for AllElevatorStates {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Heiser:")?;
+        for (id, elevator_state) in &self.elevators {
+            writeln!(f, "  {id}:")?;
+
+            for line in elevator_state.to_string().lines() {
+                writeln!(f, "    {line}")?;
+            }
+        }
+
+        writeln!(f, "Bestillinger:")?;
+        for (floor, hall_request) in self.hall_requests.iter().enumerate() {
+            writeln!(
+                f,
+                "  Etasje {floor} - Opp: {:?}, Ned: {:?}",
+                hall_request.up, hall_request.down
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
 //endre til floor variabelen i vec^
 
-//udp for å finne master 
+//udp for å finne master
 impl AllElevatorStates {
     pub fn new() -> Self {
         Self {
             elevators: HashMap::new(),
-            hall_requests: [HallRequest {
+            hall_requests: array::from_fn(|_| HallRequest {
                 up: HallRequestState::Inactive,
                 down: HallRequestState::Inactive,
-            }; NUMBER_OF_FLOORS],
+            }),
         }
     }
 
     // Velger beste heis for en bestilling
     pub fn assign_order(&mut self, floor: u8, direction: Direction) {
-
         // TODO: Skriv om til å bruke utdelt program.
 
-        //gir tilgang til å mutere heisen, tar også inn etasjen forespørselen skal til og retningen 
+        //gir tilgang til å mutere heisen, tar også inn etasjen forespørselen skal til og retningen
         //heisen skal.
-        let mut best_elevator: Option<u8> = None;
+        let mut best_elevator: Option<String> = None;
         let mut best_distance = u8::MAX;
 
         for elevator in self.elevators.values() {
@@ -83,121 +112,185 @@ impl AllElevatorStates {
 
             if distance < best_distance {
                 best_distance = distance;
-                best_elevator = Some(elevator.id);
+                best_elevator = Some(elevator.name.clone());
             }
         }
 
-        if let Some(id) = best_elevator {
+        if let Some(name) = best_elevator {
             match direction {
-                Direction::Down => self.hall_requests[floor as usize].down = HallRequestState::Assigned(id),
-                Direction::Up => self.hall_requests[floor as usize].up = HallRequestState::Assigned(id),
+                Direction::Down => {
+                    self.hall_requests[floor as usize].down =
+                        HallRequestState::Assigned(name.clone())
+                }
+                Direction::Up => {
+                    self.hall_requests[floor as usize].up = HallRequestState::Assigned(name.clone())
+                }
                 _ => panic!("Prøvde a tildele en bestilling med ugyldig rettning."),
             }
 
-            info!("Tildelte oppdrag til heis {}: {}", id, floor);
+            info!("Tildelte oppdrag til heis {}: {}", &name, floor);
         } else {
             error!("Kunne ikke tildele ordre til heis");
         }
     }
-}
-    
-//Håndter forespørsel fra slave
-/*
-fn handle_slave_request(stream: &mut TcpStream, master_state: Arc<Mutex<AllElevatorStates>>) {
-    let mut buffer = [0; 1024];
 
-    loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => {
-                info!("Slave frakoblet");
-                break;
-            }
-            Ok(n) => {
-                let received_data = String::from_utf8_lossy(&buffer[..n]);
-                info!("Mottatt melding: {}", received_data);
+    pub fn get_requests_for_elevator(&self, name: &String) -> Option<ElevatorOrders> {
+        let mut requests = [Order {
+            inside_call: false,
+            outside_call_down: false,
+            outside_call_up: false,
+        }; NUMBER_OF_FLOORS];
 
-                let mut state = master_state.lock().unwrap();
-
-                if received_data.contains("STATUS") {
-                    handle_status_update(&received_data, &mut state);
-                } else if received_data.contains("CALL") {
-                    handle_new_order(&received_data, &mut state, stream);
-                }
-            }
-            Err(e) => {
-                error!("Feil ved lesing fra stream: {}", e);
-                break;
-            }
+        for (floor, cab_request) in self.elevators.get(name)?.cab_requests.iter().enumerate() {
+            requests[floor].inside_call = *cab_request;
         }
+
+        for (floor, hall_request) in self.hall_requests.iter().enumerate() {
+            requests[floor].outside_call_up =
+                hall_request.up == HallRequestState::Assigned(name.clone());
+            requests[floor].outside_call_down =
+                hall_request.down == HallRequestState::Assigned(name.clone());
+        }
+
+        return Some(requests);
     }
 }
-*/
-//Starter TCP-server for Master
-pub fn start_master_server() {
-    let master: Host<AllElevatorStates> = Host::new_tcp_host(Some(HOST_PORT));
-    info!("Master lytter på port {}", HOST_PORT);
 
-    let all_elevator_states = Arc::new(Mutex::new(AllElevatorStates::new()));
+/// Starter TCP-server for Master og fordeler innkommende bestillinger
+pub fn start_master_server() {
+    let master: Host<AllElevatorStates> = Host::new_tcp_host(None);
+    info!("Master lytter på port {}", master.port());
+
+    // Start å informere slaver om at master eksisterer
+    let advertiser = Advertiser::init(master.port());
+    advertiser.start_advertising();
+
+    let mut master_elevator_states = AllElevatorStates::new();
     let mut slave_addresses: HashSet<SocketAddrV4> = HashSet::new();
 
     loop {
         select! {
             recv(master.receive_channel()) -> message => {
-                let (address, single_elevator_state) = message.unwrap();
+                let (address, recieved_elevator_states) = message.unwrap();
                 slave_addresses.insert(address);
 
-                info!("Master mottok melding fra slave: {:?}", single_elevator_state);
+                info!("Master mottok melding fra slave:\n{}", recieved_elevator_states);
 
-                let mut state = all_elevator_states.lock().unwrap();
-                
-                // Ta imot nye bestillinger
-                for (floor, request) in single_elevator_state.hall_requests.iter().enumerate() {
-                    if state.hall_requests[floor] != *request {
-                        if request.up != HallRequestState::Inactive {
-                            state.assign_order(floor as u8, Direction::Up)
-                        }
+                // Legg til nye heiser
+                for elevator_state in recieved_elevator_states.elevators.values() {
+                    master_elevator_states.elevators.insert(elevator_state.name.clone(), elevator_state.clone());
+                }
 
-                        if request.down != HallRequestState::Inactive {
-                            state.assign_order(floor as u8, Direction::Down)
-                        }
+                // Ta imot nye og slett fullførte bestillinger
+                for (floor, received_request) in recieved_elevator_states.hall_requests.iter().enumerate() {
+                    let master_request = master_elevator_states.hall_requests[floor].clone();
 
-                        // TODO: Håndter situasjon hvor requests er ulike, men ikke inaktiv
+                    match (&received_request.up, &master_request.up) {
+                        (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_order(floor as u8, Direction::Up),
+                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_elevator_states.hall_requests[floor].up = HallRequestState::Inactive,
+                        _ => {},
+                    }
+
+                    match (&received_request.down, &master_request.down) {
+                        (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_order(floor as u8, Direction::Down),
+                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_elevator_states.hall_requests[floor].down = HallRequestState::Inactive,
+                        _ => {},
                     }
                 }
 
                 // Informere alle slaver om nye bestillinger
                 for slave_address in &slave_addresses {
-                    master.send_channel().send((*slave_address, state.to_owned())).unwrap();
+                    master.send_channel().send((*slave_address, master_elevator_states.to_owned())).unwrap();
                 }
             }
         }
     }
-
-    // for stream in listener.incoming() {
-    //     match stream {
-    //         Ok(mut stream) => {
-    //             info!("Ny slave tilkoblet.");
-    //             let master_state = Arc::clone(&master_state);
-    //             thread::spawn(move || handle_slave_request(&mut stream, master_state));
-    //         }
-    //         Err(e) => error!("Tilkobling feilet: {}", e),
-    //     }
-    // }
 }
 
-pub fn start_slave_server() {
-    let slave: Client<AllElevatorStates> = Client::new_tcp_client([127, 0, 0, 1], HOST_PORT).unwrap();
+/// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
+pub fn start_slave_client(
+    elevio_elevator: &elevio::elev::Elevator,
+    elevator_command_tx: cbc::Sender<ElevatorOrders>,
+    elevator_event_rx: cbc::Receiver<ElevatorEvent>,
+) {
+    let rx_channels = inputs::get_input_channels(&elevio_elevator);
 
-    let mut all_elevator_states = AllElevatorStates::new();
-    all_elevator_states.elevators.insert(0, SingleElevatorState {
-        id: 0,
+    let advertiser = Advertiser::init(0u16);
+
+    info!("Leter etter en master...");
+    let (master_address, master_port) = advertiser.receive_channel().recv().unwrap();
+    info!("Fant en master: {master_address} {master_port}");
+
+    let slave: Client<AllElevatorStates> =
+        Client::new_tcp_client(master_address.ip().octets(), master_port).unwrap();
+    info!("Koblet til master!");
+
+    // Bruk et tilfeldig dyr som id :)
+    let name = petname::petname(1, "").unwrap();
+
+    let mut local_elevator_state = SingleElevatorState {
+        name: name.clone(),
         cab_requests: [false; 4],
         direction: Direction::Up,
         floor: 0,
-    });
-    all_elevator_states.hall_requests[0].up = HallRequestState::Requested;
+    };
 
-    slave.sender().send(all_elevator_states).unwrap();
+    let mut all_elevator_states = AllElevatorStates::new();
 
-    println!("Mottok: {:?}", slave.receiver().recv().unwrap());
+    loop {
+        cbc::select! {
+            recv(elevator_event_rx) -> elevator_event => {
+                let elevator_event = elevator_event.unwrap();
+
+                // Oppdater tilstand til lokal heis
+                local_elevator_state.floor = elevator_event.floor;
+                local_elevator_state.direction = elevator_event.direction;
+                local_elevator_state.cab_requests[elevator_event.floor as usize] = false;
+
+                // Marker ordre i etasje som fullførte
+                all_elevator_states.hall_requests[elevator_event.floor as usize].up = HallRequestState::Inactive;
+                all_elevator_states.hall_requests[elevator_event.floor as usize].down = HallRequestState::Inactive;
+
+                // Send den oppdaterte ordrelisten til heiskontrolleren
+                if let Some(requests) = all_elevator_states.get_requests_for_elevator(&name) {
+                    elevator_command_tx.send(requests).unwrap();
+                }
+
+                // Informer master om den nye tilstanden
+                all_elevator_states.elevators.insert(name.clone(), local_elevator_state.clone());
+                slave.sender().send(all_elevator_states.clone()).unwrap();
+            },
+            recv(rx_channels.call_button_rx) -> call_button => {
+                let call_button = call_button.unwrap();
+
+                let floor = call_button.floor as usize;
+                let hall_request = &mut all_elevator_states.hall_requests[floor];
+
+                // Legg inn bestilling på etasje
+                match call_button.call {
+                    0 if hall_request.up   == HallRequestState::Inactive => hall_request.up = HallRequestState::Requested,
+                    1 if hall_request.down == HallRequestState::Inactive => hall_request.down = HallRequestState::Requested,
+                    2 => local_elevator_state.cab_requests[floor] = true,
+                    _ => {},
+                }
+
+                // Informer master om den nye tilstanden
+                all_elevator_states.elevators.insert(name.clone(), local_elevator_state.clone());
+                slave.sender().send(all_elevator_states.clone()).unwrap();
+            },
+            recv(slave.receiver()) -> message => {
+                let (_, master_state) = message.unwrap();
+
+                all_elevator_states = master_state;
+                all_elevator_states.elevators.insert(name.clone(), local_elevator_state.clone());
+
+                info!("Received state from master:\n{all_elevator_states}");
+
+                // Send den nye bestillingslista til heiskontrolleren
+                if let Some(requests) = all_elevator_states.get_requests_for_elevator(&name) {
+                    elevator_command_tx.send(requests).unwrap();
+                }
+            },
+        }
+    }
 }

@@ -2,7 +2,7 @@ use super::socket::{Client, SendableType};
 use crate::timer::Timer;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use rand::RngCore;
-use serde::{ Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddrV4,
     thread::{spawn, JoinHandle},

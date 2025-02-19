@@ -65,7 +65,9 @@ impl<T: SendableType> Client<T> {
                 break;
             }
 
-            let address = address.as_socket_ipv4().unwrap();
+            let address = address
+                .as_socket_ipv4()
+                .unwrap_or(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
             let Ok(data) = serde_json::from_slice::<T>(&buffer[..count]) else {
                 warn!("Could not deserialize received data!");
                 continue;
@@ -137,6 +139,7 @@ impl<T: SendableType> Host<T> {
         let address = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port.unwrap_or(0)));
 
         let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
+        socket.set_reuse_address(true).unwrap();
         socket.bind(&address.into()).unwrap();
         socket.listen(BACKLOG_SIZE).unwrap();
 

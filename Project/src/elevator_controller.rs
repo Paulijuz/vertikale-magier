@@ -3,8 +3,9 @@ use crate::timer;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
 use driver_rust::elevio::elev::{DIRN_DOWN, DIRN_STOP, DIRN_UP};
+use log::info;
+use serde::{Deserialize, Serialize};
 use std::time::{self, Duration};
-use serde::{Serialize, Deserialize};
 
 const DOOR_OPEN_DURATION: time::Duration = time::Duration::from_secs(3);
 pub const NUMBER_OF_FLOORS: usize = 4;
@@ -147,12 +148,12 @@ fn start_moving(
 ) {
     let (direction, state) = elevator_state.next_direction();
 
-    println!("{direction:?} {state:?}");
+    info!("{direction:?} {state:?}");
 
     elevator_state.fsm_state = state;
 
     if state == States::DoorOpen {
-        println!("Stopping in move!");
+        info!("Stopping in move!");
         elevio_elevator.motor_direction(DIRN_STOP);
         elevator_state.direction = Direction::Stopped;
         door_timer.start(Duration::from_secs(3));
@@ -208,7 +209,7 @@ pub fn controller_loop(
             },
             recv(rx_channels.floor_sensor_rx) -> floor => {
                 let floor = floor.unwrap();
-                println!("Floor: {floor}");
+                info!("Floor: {floor}");
 
                 elevio_elevator.floor_indicator(floor); // Bruk sync lights her kanskje?
                 elevator_state.last_floor = Some(floor);
@@ -218,17 +219,17 @@ pub fn controller_loop(
                 }
 
                 if elevator_state.should_stop() {
-                    println!("Stopping.");
+                    info!("Stopping.");
                     elevator_state.fsm_state = States::DoorOpen;
                     elevio_elevator.motor_direction(DIRN_STOP);
                     elevio_elevator.door_light(true);
-                    println!("Door open.");
+                    info!("Door open.");
                     door_timer.start(DOOR_OPEN_DURATION);
                 }
             },
             recv(rx_channels.stop_button_rx) -> stop_button => {
                 let stop_button = stop_button.unwrap();
-                println!("Stop button: {:}", stop_button);
+                info!("Stop button: {:}", stop_button);
 
                 elevio_elevator.motor_direction(DIRN_STOP);
 
@@ -236,7 +237,7 @@ pub fn controller_loop(
             },
             recv(rx_channels.obstruction_rx) -> obstruction_switch => {
                 elevator_state.obstruction = obstruction_switch.unwrap();
-                println!("Obstruction: {:}", elevator_state.obstruction);
+                info!("Obstruction: {:}", elevator_state.obstruction);
             },
             recv(door_timer.timeout_channel()) -> _ => {
                 if elevator_state.obstruction {
@@ -246,7 +247,7 @@ pub fn controller_loop(
 
                 elevator_event_tx.send(ElevatorEvent { direction: elevator_state.direction, floor:elevator_state.last_floor.unwrap() }).unwrap();
 
-                println!("Door closed.");
+                info!("Door closed.");
                 elevio_elevator.door_light(false);
 
                 start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);

@@ -9,6 +9,7 @@ mod inputs;
 mod light_sync;
 mod order_dispatch;
 mod timer;
+mod master_slave;
 
 fn main() {
     let elev_num_floors = 4;
@@ -24,5 +25,7 @@ fn main() {
     thread::spawn(move || controller_loop(&elevio_elevator_cloned, elevator_controller_rx, elevator_event_tx));
 
     dispatch_loop(&elevio_elevator, elevator_command_tx, elevator_event_rx);
+
+    
 }
 

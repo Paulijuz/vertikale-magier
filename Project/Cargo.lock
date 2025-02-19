@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "driver-rust",
+ "log",
 ]
 
 [[package]]
@@ -32,3 +33,9 @@ source = "git+https://github.com/TTK4145/driver-rust?tag=v0.1.0#6c287b7636698b59
 dependencies = [
  "crossbeam-channel",
 ]
+
+[[package]]
+name = "log"
+version = "0.4.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04cbf5b083de1c7e0222a7a51dbfdba1cbe1c6ab0b15e29fff3f6c077fd9cd9f"

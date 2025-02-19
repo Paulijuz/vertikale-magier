@@ -1,25 +1,28 @@
-use UdpSocket;
-use Ipv4Addr;
-use Duration, Instant;
+use std::net::UdpSocket;
+use std::net::Ipv4Addr;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use std::thread;
-use Arc, Mutex;
-use std::{net::{UdpSocket, TcpListener, TcpStream}io::{Read, Write}, time::Duration};
+use std::{net::{ TcpListener, TcpStream},io::{Read, Write}};
 use log::{info, error, warn};
 
-
-mod elevator_controller;
-mod inputs;
-mod light_sync;
-mod order_dispatch;
-mod timer;
-
-use crate::elevator::{Elevator, States, Direction, OrderArray};
+use crate::elevator_controller::Order;
+use crate::elevator_controller::{ States, Direction, ElevatorOrders};
 
 
 const UDP_PORT: &str = "20026";
 const TCP_PORT: &str = "33546";
 //const BROADCAST_ADDR: &str = "10.100.23.255:20026"; // Sender master IP her
 
+#[derive(Debug, Clone, Copy)]
+pub struct Elevator {
+    pub direction: Direction,
+    pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
+    pub orders: ElevatorOrders,
+    pub state: States,
+    pub obstruction : bool
+}
 
 // Struktur for å lagre informasjon om hver heis
 #[derive(Debug, Clone, Copy)]
@@ -36,7 +39,7 @@ enum ElevatorRole {
 //vet ikke om vi trenger den over^
 
 // MasterState: Holder oversikt over alle heiser og bestillinger
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct MasterState {
     pub elevators: Vec<ElevatorInfo>,   //Liste over alle aktive heiser
     pub orders: Vec<(u8, Direction)>,  //Bestillinger (etasje, retning) 
@@ -139,6 +142,7 @@ fn handle_slave_request(stream: &mut TcpStream, master_state: Arc<Mutex<MasterSt
 }
 
 
+
 // Håndter statusoppdatering fra en slave
 fn handle_status_update(received_data: &str, state: &mut MasterState) {
     let parts: Vec<&str> = received_data.split_whitespace().collect();
@@ -157,7 +161,7 @@ fn handle_status_update(received_data: &str, state: &mut MasterState) {
             _ => States::OutOfOrder,
         };
 
-        let orders: OrderArray = [Order {
+        let orders: ElevatorOrders = [Order {
             outside_call_up: parts[5] == "1",
             outside_call_down: parts[6] == "1",
             inside_call: parts[7] == "1",

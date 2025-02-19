@@ -26,6 +26,5 @@ fn main() {
 
     dispatch_loop(&elevio_elevator, elevator_command_tx, elevator_event_rx);
 
-    
 }
 

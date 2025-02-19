@@ -37,7 +37,7 @@ pub struct ElevatorEvent {
     pub floor: u8,
 }
 
-// TODO: Ville kanskje vært bedre om man hadde en "ElevatorController" struct 
+// TODO: Ville kanskje vært bedre om man hadde en "ElevatorController" struct
 struct ElevatorState {
     fsm_state: States,
     direction: Direction,
@@ -186,7 +186,7 @@ pub fn controller_loop(
         fsm_state: States::Idle,
         direction: Direction::Stopped,
         obstruction: false, // TODO: Check the obstruction state once in the beginning
-        last_floor: Some(0),   // TODO: Check floor once in the beginning
+        last_floor: Some(0), // TODO: Check floor once in the beginning
         orders: [Order {
             inside_call: false,
             outside_call_up: false,

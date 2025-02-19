@@ -2,29 +2,20 @@ use crossbeam_channel as cbc;
 use driver_rust::elevio;
 use elevator_controller::controller_loop;
 use order_dispatch::dispatch_loop;
-use std::{thread::{self, sleep, spawn}, time::Duration};
+use std::{
+    thread::{self, sleep, spawn},
+    time::Duration,
+};
 
 mod elevator_controller;
 mod inputs;
 mod light_sync;
+mod network;
 mod order_dispatch;
 mod timer;
-mod network;
-
-struct X<T> {
-    x: T
-}
 
 fn main() {
     let node = network::node::Node::init();
-
-    let (tx, rx) = cbc::unbounded::<X<u32>>();
-
-    spawn(move || {
-        tx.send(X {
-            x: 2,
-        });
-    });
 
     loop {
         sleep(Duration::from_secs(10));

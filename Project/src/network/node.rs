@@ -3,9 +3,8 @@ use super::{
     socket::{Client, Host, SendableType},
 };
 use crossbeam_channel::{never, select};
-use log::warn;
 use std::{
-    net::{SocketAddr, SocketAddrV4},
+    net::SocketAddrV4,
     thread::{sleep, spawn, JoinHandle},
     time::Duration,
 };
@@ -37,15 +36,14 @@ fn run_node() {
     let host: Host<String> = Host::new_tcp_host(None);
     let port = host.port();
 
-    let advertisment: String = format!("MASTER: {port}");
-    let advertiser = Advertiser::init(&advertisment);
+    let advertiser = Advertiser::init(port);
     advertiser.start_advertising();
 
     let mut role = Role::Master(host);
 
     loop {
         let from_slaves_channel = match &role {
-            Role::Master(host) => host.receiver(),
+            Role::Master(host) => host.receive_channel(),
             _ => &never(),
         };
 
@@ -53,22 +51,12 @@ fn run_node() {
             Role::Slave(client) => client.receiver(),
             _ => &never(),
         };
-        
+
         select! {
             recv(advertiser.receive_channel()) -> advertisment => {
-                let (address, data) = advertisment.unwrap();
+                let (address, port) = advertisment.unwrap();
 
                 // TODO: This should be part of the advertiser/socket modules:
-                let Some(port) = data.strip_prefix("MASTER: ") else {
-                    println!("\nReceived garbage: {data}");
-                    continue;
-                };
-
-                let Ok(port) = port.parse::<u16>() else {
-                    warn!("\nReceived invalid port: {port}");
-                    continue;
-                };
-
                 let master_address = SocketAddrV4::new(*address.ip(), port);
 
                 match &role {
@@ -95,7 +83,7 @@ fn run_node() {
                 println!("\nData from slave recieved!");
 
                 let (address, data) = message.unwrap();
-                
+
                 println!("Received data from slave ({address}): {data}");
             },
             recv(from_master_channel) -> message => {
@@ -107,7 +95,7 @@ fn run_node() {
                     let host = Host::new_tcp_host(None);
                     let port = host.port();
 
-                    advertiser.set_advertisment(&format!("MASTER: {port}"));
+                    advertiser.set_advertisment(port);
                     advertiser.start_advertising();
 
                     role = Role::Master(host);

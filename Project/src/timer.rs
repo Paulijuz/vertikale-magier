@@ -1,8 +1,8 @@
+use crossbeam_channel as cbc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
-use crossbeam_channel as cbc;
 
 #[derive(Debug)]
 pub struct Timer {
@@ -23,7 +23,11 @@ impl Timer {
     }
 
     pub fn start(&mut self, duration: Duration) {
-        if self.is_active.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_err() {
+        if self
+            .is_active
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+        {
             return;
         }
 

@@ -19,9 +19,7 @@ const TCP_PORT: &str = "33546";
 pub struct Elevator {
     pub direction: Direction,
     pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
-    pub orders: ElevatorOrders,
-    pub state: States,
-    pub obstruction : bool
+    pub orders: ElevatorOrders
 }
 
 // Struktur for å lagre informasjon om hver heis
@@ -47,8 +45,6 @@ pub struct MasterState {
 //endre til floor variabelen i vec^
 
 //udp for å finne master 
-
-
 
 impl MasterState {
     // Oppretter en ny MasterState
@@ -78,7 +74,6 @@ impl MasterState {
         let mut best_distance = u8::MAX;
 
         for elevator in &self.elevators {
-            if elevator.status.state == States::OutOfOrder { continue; }  // Ignorer ødelagte heiser
             let distance = (elevator.status.floor as i8 - floor as i8).abs() as u8;
 
             if distance < best_distance {
@@ -90,26 +85,6 @@ impl MasterState {
         best_elevator
     }
 }
-
-//Starter TCP-server for Master
-pub fn start_master_server() {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", TCP_PORT)).expect("Kunne ikke binde master-server.");
-    let master_state = Arc::new(Mutex::new(MasterState::new()));
-
-    info!("Master lytter på port {}", TCP_PORT);
-
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
-                info!("Ny slave tilkoblet.");
-                let master_state = Arc::clone(&master_state);
-                thread::spawn(move || handle_slave_request(&mut stream, master_state));
-            }
-            Err(e) => error!("Tilkobling feilet: {}", e),
-        }
-    }
-}
-
 
 //Håndter forespørsel fra slave
 fn handle_slave_request(stream: &mut TcpStream, master_state: Arc<Mutex<MasterState>>) {
@@ -141,12 +116,11 @@ fn handle_slave_request(stream: &mut TcpStream, master_state: Arc<Mutex<MasterSt
     }
 }
 
-
-
 // Håndter statusoppdatering fra en slave
 fn handle_status_update(received_data: &str, state: &mut MasterState) {
     let parts: Vec<&str> = received_data.split_whitespace().collect();
     if parts.len() >= 6 {
+        // legge til antakelsen om at den er disconnected 
         let elevator_id: u8 = parts[1].parse().unwrap_or(0);
         let floor: u8 = parts[2].parse().unwrap_or(0);
         let direction = match parts[3] {
@@ -168,9 +142,7 @@ fn handle_status_update(received_data: &str, state: &mut MasterState) {
         }; 4];
 
         let elevator = Elevator {
-            state: state_enum,
             direction,
-            obstruction: false,
             floor,
             orders,
         };
@@ -200,6 +172,27 @@ fn handle_new_order(received_data: &str, state: &mut MasterState, stream: &mut T
             }
         } else {
             state.orders.push((floor, direction));
+        }
+    }
+}
+
+
+// DETTE KAN VÆRE EN DEL AV EN EGEN MODUL
+//Starter TCP-server for Master
+pub fn start_master_server() {
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", TCP_PORT)).expect("Kunne ikke binde master-server.");
+    let master_state = Arc::new(Mutex::new(MasterState::new()));
+
+    info!("Master lytter på port {}", TCP_PORT);
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(mut stream) => {
+                info!("Ny slave tilkoblet.");
+                let master_state = Arc::clone(&master_state);
+                thread::spawn(move || handle_slave_request(&mut stream, master_state));
+            }
+            Err(e) => error!("Tilkobling feilet: {}", e),
         }
     }
 }

@@ -4,9 +4,10 @@ use crossbeam_channel as cbc;
 use driver_rust::elevio;
 use driver_rust::elevio::elev::{DIRN_DOWN, DIRN_STOP, DIRN_UP};
 use std::time::{self, Duration};
+use serde::{Serialize, Deserialize};
 
 const DOOR_OPEN_DURATION: time::Duration = time::Duration::from_secs(3);
-const NUMBER_OF_FLOORS: usize = 4;
+pub const NUMBER_OF_FLOORS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum States {
@@ -16,14 +17,14 @@ pub enum States {
     OutOfOrder,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
     Up,
     Down,
     Stopped,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Order {
     pub outside_call_up: bool,
     pub outside_call_down: bool,

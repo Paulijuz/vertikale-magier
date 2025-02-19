@@ -15,12 +15,6 @@ mod order_dispatch;
 mod timer;
 
 fn main() {
-    let node = network::node::Node::init();
-
-    loop {
-        sleep(Duration::from_secs(10));
-    }
-
     // let elev_num_floors = 4;
     // let elevio_elevator = elevio::elev::Elevator::init("localhost:15657", elev_num_floors).unwrap(); // TODO: Slå sammen med en annen struct på en eller annen måte?
     // println!("Elevator started:\n{:#?}", elevio_elevator);

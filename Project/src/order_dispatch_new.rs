@@ -2,7 +2,7 @@ use core::fmt;
 use crossbeam_channel as cbc;
 use crossbeam_channel::select;
 use driver_rust::elevio;
-use log::{error, info};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use std::array;
 use std::collections::{HashMap, HashSet};
@@ -109,6 +109,8 @@ impl AllElevatorStates {
 
         for elevator in self.elevators.values() {
             let distance = (elevator.floor as i8 - floor as i8).abs() as u8;
+
+            debug!("Elevator {} is {} floors away from floor nr. {}.", elevator.name, distance, floor);
 
             if distance < best_distance {
                 best_distance = distance;

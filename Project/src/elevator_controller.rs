@@ -37,7 +37,7 @@ pub struct ElevatorEvent {
     pub floor: u8,
 }
 
-// TODO: Ville kanskje vært bedre om man hadde en "ElevatorController" struct 
+// TODO: Ville kanskje vært bedre om man hadde en "ElevatorController" struct
 struct ElevatorState {
     fsm_state: States,
     direction: Direction,
@@ -142,7 +142,7 @@ impl ElevatorState {
 fn start_moving(
     elevator_state: &mut ElevatorState,
     elevio_elevator: &elevio::elev::Elevator,
-    door_timer: &timer::Timer,
+    door_timer: &mut timer::Timer,
 ) {
     let (direction, state) = elevator_state.next_direction();
 
@@ -180,13 +180,13 @@ pub fn controller_loop(
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
     let rx_channels = inputs::get_input_channels(&elevio_elevator);
-    let door_timer = timer::Timer::init();
+    let mut door_timer = timer::Timer::init();
 
     let mut elevator_state = ElevatorState {
         fsm_state: States::Idle,
         direction: Direction::Stopped,
         obstruction: false, // TODO: Check the obstruction state once in the beginning
-        last_floor: Some(0),   // TODO: Check floor once in the beginning
+        last_floor: Some(0), // TODO: Check floor once in the beginning
         orders: [Order {
             inside_call: false,
             outside_call_up: false,
@@ -203,7 +203,7 @@ pub fn controller_loop(
                     continue;
                 }
 
-                start_moving(&mut elevator_state, elevio_elevator, &door_timer);
+                start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
             },
             recv(rx_channels.floor_sensor_rx) -> floor => {
                 let floor = floor.unwrap();
@@ -237,7 +237,7 @@ pub fn controller_loop(
                 elevator_state.obstruction = obstruction_switch.unwrap();
                 println!("Obstruction: {:}", elevator_state.obstruction);
             },
-            recv(door_timer.timeout_channel_rx) -> _ => {
+            recv(door_timer.timeout_channel()) -> _ => {
                 if elevator_state.obstruction {
                     door_timer.start(DOOR_OPEN_DURATION);
                     continue;
@@ -248,8 +248,8 @@ pub fn controller_loop(
                 println!("Door closed.");
                 elevio_elevator.door_light(false);
 
-                start_moving(&mut elevator_state, elevio_elevator, &door_timer);
-            }
+                start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
+            },
         }
     }
 }

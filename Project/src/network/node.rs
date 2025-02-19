@@ -3,6 +3,7 @@ use super::{
     socket::{Client, Host, SendableType},
 };
 use crossbeam_channel::{never, select};
+use log::{debug};
 use std::{
     net::SocketAddrV4,
     thread::{sleep, spawn, JoinHandle},
@@ -38,7 +39,6 @@ fn run_node() {
 
     let advertiser = Advertiser::init(port);
     advertiser.start_advertising();
-
     let mut role = Role::Master(host);
 
     loop {
@@ -56,41 +56,41 @@ fn run_node() {
             recv(advertiser.receive_channel()) -> advertisment => {
                 let (address, port) = advertisment.unwrap();
 
-                // TODO: This should be part of the advertiser/socket modules:
                 let master_address = SocketAddrV4::new(*address.ip(), port);
 
                 match &role {
                     Role::Master(_) => {
-                        println!("\nFound another master node: {master_address}");
+                        debug!("\nFound another master node: {master_address}");
                         advertiser.stop_advertising();
 
-                        println!("Waiting to connect!");
+                        debug!("Waiting to connect...");
                         sleep(Duration::from_millis(rand::random_range(0..=100)));
 
                         if let Ok(client) = Client::new_tcp_client(address.ip().octets(), port) {
-                            println!("Successfully connected!");
+                            debug!("Successfully connected!");
                             role = Role::Slave(client);
+                            debug!("Now slave.");
                             continue;
                         }
 
-                        println!("Could not connect to master.");
+                        debug!("Could not connect to master.");
                         advertiser.start_advertising();
                     },
                     _ => {},
                 }
             },
             recv(from_slaves_channel) -> message => {
-                println!("\nData from slave recieved!");
+                debug!("\nData from slave recieved!");
 
                 let (address, data) = message.unwrap();
 
-                println!("Received data from slave ({address}): {data}");
+                debug!("Received data from slave ({address}): {data}");
             },
             recv(from_master_channel) -> message => {
-                println!("\nData from master recieved!");
+                debug!("\nData from master recieved.");
 
                 let Ok((_, data)) = message else {
-                    println!("Master dead");
+                    debug!("Master dead!");
 
                     let host = Host::new_tcp_host(None);
                     let port = host.port();
@@ -100,11 +100,11 @@ fn run_node() {
 
                     role = Role::Master(host);
 
-                    println!("Master disconnected!");
+                    debug!("Now master.");
                     continue;
                 };
 
-                println!("Received data from master: {data}");
+                debug!("Received data from master: {data}");
             }
         }
     }

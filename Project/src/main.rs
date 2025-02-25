@@ -9,6 +9,7 @@ mod inputs;
 mod light_sync;
 mod order_dispatch;
 mod timer;
+mod hall_request_assigner;
 
 fn main() {
     let elev_num_floors = 4;

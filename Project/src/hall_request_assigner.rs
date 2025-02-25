@@ -1,6 +1,6 @@
 use std::process::Command;
 
-fn run_hall_request_assigner(hall_requests: &str, states: &str) -> Result<String, String> {
+pub fn run_hall_request_assigner(hall_requests: &str, states: &str) -> Result<String, String> {
     // Construct the input JSON
     let input_json = format!(
         r#"{{"hallRequests":{},"states":{}}}"#,

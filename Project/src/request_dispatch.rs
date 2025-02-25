@@ -48,7 +48,7 @@ impl fmt::Display for SingleElevatorState {
         writeln!(
             f,
             "Navn: {}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger: {:?}",
-            self.name, self.direction, self.floor, self.cab_requests
+            self.name, self.direction, self.floor + 1, self.cab_requests
         )
     }
 }
@@ -93,10 +93,10 @@ impl fmt::Display for AllElevatorStates {
         }
 
         writeln!(f, "Bestillinger:")?;
-        for (floor, hall_request) in self.hall_requests.iter().enumerate() {
+        for (floor, hall_request) in self.hall_requests.iter().rev().enumerate() {
             writeln!(
                 f,
-                "  Etasje {floor} - Opp: {:?}, Ned: {:?}",
+                "  Etasje {floor} - Ned: {:?}, Opp: {:?}",
                 hall_request.up, hall_request.down
             )?;
         }

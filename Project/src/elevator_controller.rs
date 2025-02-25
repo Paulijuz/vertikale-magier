@@ -204,7 +204,7 @@ pub fn controller_loop(
 
                 if elevator_state.fsm_state != State::Idle {
                     continue;
-                }
+                }      
 
                 start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
             },

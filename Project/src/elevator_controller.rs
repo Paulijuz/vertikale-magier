@@ -246,7 +246,7 @@ pub fn controller_loop(
                     continue;
                 }
 
-                elevator_event_tx.send(ElevatorEvent { 
+                elevator_event_tx.send(ElevatorEvent {
                     direction: elevator_state.direction,
                     state: elevator_state.fsm_state,
                     floor: elevator_state.last_floor.unwrap(),

@@ -1,6 +1,6 @@
-use std::{collections::HashMap, process::Command};
-
+use crate::elevator_controller::NUMBER_OF_FLOORS;
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, process::Command};
 
 #[derive(Serialize, Deserialize)]
 pub enum Behaviour {
@@ -28,12 +28,12 @@ pub struct State {
     pub floor: u8,
     pub direction: Direction,
     #[serde(rename = "cabRequests")]
-    pub cab_requests: [bool; 4],
+    pub cab_requests: [bool; NUMBER_OF_FLOORS],
 }
 
 pub type States = HashMap<String, State>;
 
-pub type HallRequests = [(bool, bool); 4];
+pub type HallRequests = [(bool, bool); NUMBER_OF_FLOORS];
 
 #[derive(Serialize, Deserialize)]
 pub struct HallRequestsAssignerInput {
@@ -44,7 +44,9 @@ pub struct HallRequestsAssignerInput {
 
 pub type HallRequestsAssignerOutput = HashMap<String, HallRequests>;
 
-pub fn run_hall_request_assigner(input: HallRequestsAssignerInput) -> Result<HallRequestsAssignerOutput, String> {
+pub fn run_hall_request_assigner(
+    input: HallRequestsAssignerInput,
+) -> Result<HallRequestsAssignerOutput, String> {
     // Construct the input JSON
     let input_json = serde_json::to_string(&input).unwrap();
 

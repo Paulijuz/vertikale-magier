@@ -1,19 +1,19 @@
+use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorRequests, Request};
+use crate::elevator_controller::{State, NUMBER_OF_FLOORS};
+use crate::hall_request_assigner::{self as hra, HallRequestsAssignerInput};
+use crate::inputs;
+use crate::network::advertiser::Advertiser;
+use crate::network::socket::{Client, Host};
 use core::fmt;
 use crossbeam_channel as cbc;
 use crossbeam_channel::select;
 use driver_rust::elevio;
+use driver_rust::elevio::elev::{CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use std::array;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
-
-use crate::elevator_controller::{State, NUMBER_OF_FLOORS};
-use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorRequests, Request};
-use crate::hall_request_assigner::{self as hra, HallRequestsAssignerInput};
-use crate::inputs;
-use crate::network::advertiser::Advertiser;
-use crate::network::socket::{Client, Host};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleElevatorState {
@@ -26,19 +26,19 @@ pub struct SingleElevatorState {
 
 impl From<&SingleElevatorState> for hra::State {
     fn from(single_elevator_state: &SingleElevatorState) -> Self {
-        hra::State { 
+        hra::State {
             behaviour: match single_elevator_state.state {
                 State::DoorOpen => hra::Behaviour::DoorOpen,
                 State::Moving => hra::Behaviour::Moving,
                 _ => hra::Behaviour::Idle,
-            }, 
-            floor: single_elevator_state.floor, 
+            },
+            floor: single_elevator_state.floor,
             direction: match single_elevator_state.direction {
                 Direction::Down => hra::Direction::Down,
                 Direction::Stopped => hra::Direction::Stop,
                 Direction::Up => hra::Direction::Up,
-            }, 
-            cab_requests: single_elevator_state.cab_requests, 
+            },
+            cab_requests: single_elevator_state.cab_requests,
         }
     }
 }
@@ -123,17 +123,29 @@ impl AllElevatorStates {
     pub fn assign_request(&mut self, floor: u8, direction: Direction) {
         match direction {
             Direction::Up => self.hall_requests[floor as usize].up = HallRequestState::Requested,
-            Direction::Down => self.hall_requests[floor as usize].down = HallRequestState::Requested,
+            Direction::Down => {
+                self.hall_requests[floor as usize].down = HallRequestState::Requested
+            }
             _ => panic!("Tried to assign request with invalid direction"),
         }
 
-        let hall_requests= self.hall_requests.clone().map(|request| (request.up != HallRequestState::Inactive, request.down != HallRequestState::Inactive));
-        let states = self.elevators.iter().map(|(k, v)| (k.to_owned(), v.into())).collect();
+        let hall_requests = self.hall_requests.clone().map(|request| {
+            (
+                request.up != HallRequestState::Inactive,
+                request.down != HallRequestState::Inactive,
+            )
+        });
+        let states = self
+            .elevators
+            .iter()
+            .map(|(k, v)| (k.to_owned(), v.into()))
+            .collect();
 
         let assignments = hra::run_hall_request_assigner(HallRequestsAssignerInput {
             hall_requests,
             states,
-        }).unwrap();
+        })
+        .unwrap();
 
         for (id, assigned_hall_requests) in assignments.iter() {
             for (floor, (up, down)) in assigned_hall_requests.iter().enumerate() {
@@ -160,8 +172,7 @@ impl AllElevatorStates {
         }
 
         for (floor, hall_request) in self.hall_requests.iter().enumerate() {
-            requests[floor].hall_up =
-                hall_request.up == HallRequestState::Assigned(name.clone());
+            requests[floor].hall_up = hall_request.up == HallRequestState::Assigned(name.clone());
             requests[floor].hall_down =
                 hall_request.down == HallRequestState::Assigned(name.clone());
         }
@@ -260,12 +271,17 @@ pub fn start_slave_client(
                 // Oppdater tilstand til lokal heis
                 local_elevator_state.floor = elevator_event.floor;
                 local_elevator_state.direction = elevator_event.direction;
-                local_elevator_state.cab_requests[elevator_event.floor as usize] = false;
                 local_elevator_state.state = elevator_event.state;
 
                 // Marker ordre i etasje som fullførte
-                all_elevator_states.hall_requests[elevator_event.floor as usize].up = HallRequestState::Inactive;
-                all_elevator_states.hall_requests[elevator_event.floor as usize].down = HallRequestState::Inactive;
+                local_elevator_state.cab_requests[elevator_event.floor as usize] = false;
+
+                if elevator_event.direction != Direction::Down {
+                    all_elevator_states.hall_requests[elevator_event.floor as usize].up = HallRequestState::Inactive;
+                }
+                if elevator_event.direction != Direction::Up {
+                    all_elevator_states.hall_requests[elevator_event.floor as usize].down = HallRequestState::Inactive;
+                }
 
                 // Send den oppdaterte ordrelisten til heiskontrolleren
                 if let Some(requests) = all_elevator_states.get_requests_for_elevator(&name) {
@@ -284,9 +300,9 @@ pub fn start_slave_client(
 
                 // Legg inn bestilling på etasje
                 match call_button.call {
-                    0 if hall_request.up   == HallRequestState::Inactive => hall_request.up = HallRequestState::Requested,
-                    1 if hall_request.down == HallRequestState::Inactive => hall_request.down = HallRequestState::Requested,
-                    2 => local_elevator_state.cab_requests[floor] = true,
+                    HALL_UP if hall_request.up   == HallRequestState::Inactive => hall_request.up = HallRequestState::Requested,
+                    HALL_DOWN if hall_request.down == HallRequestState::Inactive => hall_request.down = HallRequestState::Requested,
+                    CAB => local_elevator_state.cab_requests[floor] = true,
                     _ => {},
                 }
 

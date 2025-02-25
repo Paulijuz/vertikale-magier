@@ -93,7 +93,7 @@ impl fmt::Display for AllElevatorStates {
         }
 
         writeln!(f, "Bestillinger:")?;
-        for (mut floor, hall_request) in self.hall_requests.iter().rev().enumerate() {
+        for (mut floor, hall_request) in self.hall_requests.iter().enumerate().rev() {
             floor += 1;
 
             writeln!(

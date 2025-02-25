@@ -205,7 +205,7 @@ pub fn controller_loop(
 
                 if elevator_state.fsm_state != State::Idle {
                     continue;
-                }
+                }      
 
                 start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
             },
@@ -247,7 +247,7 @@ pub fn controller_loop(
                     continue;
                 }
 
-                elevator_event_tx.send(ElevatorEvent { 
+                elevator_event_tx.send(ElevatorEvent {
                     direction: elevator_state.direction,
                     state: elevator_state.fsm_state,
                     floor: elevator_state.last_floor.unwrap(),

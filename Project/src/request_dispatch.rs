@@ -47,8 +47,8 @@ impl fmt::Display for SingleElevatorState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "Navn: {}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger: {:?}",
-            self.name, self.direction, self.floor + 1, self.cab_requests
+            "Navn: {}\nTilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger: {:?}",
+            self.name, self.state, self.direction, self.floor + 1, self.cab_requests
         )
     }
 }

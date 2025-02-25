@@ -207,6 +207,12 @@ pub fn controller_loop(
                 }
 
                 start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
+
+                elevator_event_tx.send(ElevatorEvent {
+                    direction: elevator_state.direction,
+                    state: elevator_state.fsm_state,
+                    floor: elevator_state.last_floor.unwrap(),
+                }).unwrap();
             },
             recv(rx_channels.floor_sensor_rx) -> floor => {
                 let floor = floor.unwrap();
@@ -227,6 +233,12 @@ pub fn controller_loop(
                     info!("Door open.");
                     door_timer.start(DOOR_OPEN_DURATION);
                 }
+
+                elevator_event_tx.send(ElevatorEvent {
+                    direction: elevator_state.direction,
+                    state: elevator_state.fsm_state,
+                    floor: elevator_state.last_floor.unwrap(),
+                }).unwrap();
             },
             recv(rx_channels.stop_button_rx) -> stop_button => {
                 let stop_button = stop_button.unwrap();
@@ -250,13 +262,13 @@ pub fn controller_loop(
                 elevio_elevator.door_light(false);
 
                 start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
+
+                elevator_event_tx.send(ElevatorEvent {
+                    direction: elevator_state.direction,
+                    state: elevator_state.fsm_state,
+                    floor: elevator_state.last_floor.unwrap(),
+                }).unwrap();
             },
         }
-        
-        elevator_event_tx.send(ElevatorEvent {
-            direction: elevator_state.direction,
-            state: elevator_state.fsm_state,
-            floor: elevator_state.last_floor.unwrap(),
-        }).unwrap();
     }
 }

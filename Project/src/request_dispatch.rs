@@ -277,9 +277,11 @@ pub fn start_slave_client(
                 local_elevator_state.cab_requests[elevator_event.floor as usize] = false;
 
                 if elevator_event.direction != Direction::Down {
+                    debug!("Cleared up.");
                     all_elevator_states.hall_requests[elevator_event.floor as usize].up = HallRequestState::Inactive;
                 }
                 if elevator_event.direction != Direction::Up {
+                    debug!("Cleared down.");
                     all_elevator_states.hall_requests[elevator_event.floor as usize].down = HallRequestState::Inactive;
                 }
 

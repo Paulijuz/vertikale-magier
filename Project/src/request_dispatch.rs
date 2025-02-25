@@ -97,7 +97,7 @@ impl fmt::Display for AllElevatorStates {
             writeln!(
                 f,
                 "  Etasje {floor} - Ned: {:?}, Opp: {:?}",
-                hall_request.up, hall_request.down
+                hall_request.down, hall_request.up
             )?;
         }
 

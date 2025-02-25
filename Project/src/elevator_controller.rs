@@ -26,13 +26,13 @@ pub enum Direction {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Order {
-    pub outside_call_up: bool,
-    pub outside_call_down: bool,
-    pub inside_call: bool,
+pub struct Request {
+    pub hall_up: bool,
+    pub hall_down: bool,
+    pub cab: bool,
 }
 
-pub type ElevatorOrders = [Order; NUMBER_OF_FLOORS];
+pub type ElevatorRequests = [Request; NUMBER_OF_FLOORS];
 
 pub struct ElevatorEvent {
     pub direction: Direction,
@@ -45,72 +45,72 @@ struct ElevatorState {
     direction: Direction,
     obstruction: bool,
     last_floor: Option<u8>,
-    orders: ElevatorOrders,
+    requests: ElevatorRequests,
 }
 
 impl ElevatorState {
-    pub fn orders_below(&self) -> bool {
+    pub fn requests_below(&self) -> bool {
         let Some(floor) = self.last_floor else {
             return false;
         };
 
-        self.orders[..floor as usize]
+        self.requests[..floor as usize]
             .iter()
-            .any(|order| order.inside_call || order.outside_call_down || order.outside_call_up)
+            .any(|request| request.cab || request.hall_down || request.hall_up)
     }
-    pub fn orders_above(&self) -> bool {
+    pub fn requests_above(&self) -> bool {
         let Some(floor) = self.last_floor else {
             return false;
         };
 
-        self.orders[floor as usize + 1..]
+        self.requests[floor as usize + 1..]
             .iter()
-            .any(|order| order.inside_call || order.outside_call_down || order.outside_call_up)
+            .any(|request| request.cab || request.hall_down || request.hall_up)
     }
-    pub fn orders_here(&self, direction: Option<Direction>) -> bool {
+    pub fn requests_here(&self, direction: Option<Direction>) -> bool {
         let Some(floor) = self.last_floor else {
             return false;
         };
 
-        let order = self.orders[floor as usize];
+        let request = self.requests[floor as usize];
 
         match direction {
-            Some(Direction::Up) => order.inside_call || order.outside_call_up,
-            Some(Direction::Down) => order.inside_call || order.outside_call_up,
-            _ => order.inside_call || order.outside_call_up || order.outside_call_down,
+            Some(Direction::Up) => request.cab || request.hall_up,
+            Some(Direction::Down) => request.cab || request.hall_up,
+            _ => request.cab || request.hall_up || request.hall_down,
         }
     }
     pub fn next_direction(&self) -> (Direction, States) {
         // TODO: Flytte ut fra main
         match self.direction {
             Direction::Up => {
-                return if self.orders_above() {
+                return if self.requests_above() {
                     (Direction::Up, States::Moving)
-                } else if self.orders_here(None) {
+                } else if self.requests_here(None) {
                     (Direction::Down, States::DoorOpen)
-                } else if self.orders_below() {
+                } else if self.requests_below() {
                     (Direction::Down, States::Moving)
                 } else {
                     (Direction::Stopped, States::Idle)
                 }
             }
             Direction::Down => {
-                return if self.orders_below() {
+                return if self.requests_below() {
                     (Direction::Down, States::Moving)
-                } else if self.orders_here(None) {
+                } else if self.requests_here(None) {
                     (Direction::Up, States::DoorOpen)
-                } else if self.orders_above() {
+                } else if self.requests_above() {
                     (Direction::Up, States::Moving)
                 } else {
                     (Direction::Stopped, States::Idle)
                 }
             }
             Direction::Stopped => {
-                return if self.orders_here(None) {
+                return if self.requests_here(None) {
                     (Direction::Stopped, States::DoorOpen)
-                } else if self.orders_above() {
+                } else if self.requests_above() {
                     (Direction::Up, States::Moving)
-                } else if self.orders_below() {
+                } else if self.requests_below() {
                     (Direction::Down, States::Moving)
                 } else {
                     (Direction::Stopped, States::Idle)
@@ -126,14 +126,14 @@ impl ElevatorState {
 
         match self.direction {
             Direction::Down => {
-                return self.orders[floor].outside_call_down
-                    || self.orders[floor].inside_call
-                    || !self.orders_below()
+                return self.requests[floor].hall_down
+                    || self.requests[floor].cab
+                    || !self.requests_below()
             }
             Direction::Up => {
-                return self.orders[floor].outside_call_up
-                    || self.orders[floor].inside_call
-                    || !self.orders_above()
+                return self.requests[floor].hall_up
+                    || self.requests[floor].cab
+                    || !self.requests_above()
             }
             _ => return true,
         }
@@ -178,7 +178,7 @@ fn start_moving(
 
 pub fn controller_loop(
     elevio_elevator: &elevio::elev::Elevator,
-    command_channel_rx: cbc::Receiver<ElevatorOrders>,
+    command_channel_rx: cbc::Receiver<ElevatorRequests>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
     let rx_channels = inputs::get_input_channels(&elevio_elevator);
@@ -189,17 +189,17 @@ pub fn controller_loop(
         direction: Direction::Stopped,
         obstruction: false, // TODO: Check the obstruction state once in the beginning
         last_floor: Some(0), // TODO: Check floor once in the beginning
-        orders: [Order {
-            inside_call: false,
-            outside_call_up: false,
-            outside_call_down: false,
+        requests: [Request {
+            cab: false,
+            hall_up: false,
+            hall_down: false,
         }; NUMBER_OF_FLOORS],
     };
 
     loop {
         cbc::select! {
             recv(command_channel_rx) -> command => {
-                elevator_state.orders = command.unwrap();
+                elevator_state.requests = command.unwrap();
 
                 if elevator_state.fsm_state != States::Idle {
                     continue;

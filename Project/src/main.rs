@@ -2,7 +2,7 @@ mod elevator_controller;
 mod inputs;
 mod light_sync;
 mod network;
-mod order_dispatch_new;
+mod request_dispatch;
 mod timer;
 
 use crossbeam_channel as cbc;
@@ -10,7 +10,7 @@ use driver_rust::elevio;
 use elevator_controller::controller_loop;
 use env_logger;
 use log::{error, info, LevelFilter};
-use order_dispatch_new::{start_master_server, start_slave_client};
+use request_dispatch::{start_master_server, start_slave_client};
 use std::{env, thread::spawn};
 
 fn main() {

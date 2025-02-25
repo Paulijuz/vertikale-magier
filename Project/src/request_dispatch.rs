@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
 
 use crate::elevator_controller::NUMBER_OF_FLOORS;
-use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorOrders, Order};
+use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorRequests, Request};
 use crate::inputs;
 use crate::network::advertiser::Advertiser;
 use crate::network::socket::{Client, Host};
@@ -99,7 +99,7 @@ impl AllElevatorStates {
     }
 
     // Velger beste heis for en bestilling
-    pub fn assign_order(&mut self, floor: u8, direction: Direction) {
+    pub fn assign_request(&mut self, floor: u8, direction: Direction) {
         // TODO: Skriv om til å bruke utdelt program.
 
         //gir tilgang til å mutere heisen, tar også inn etasjen forespørselen skal til og retningen
@@ -136,21 +136,21 @@ impl AllElevatorStates {
         }
     }
 
-    pub fn get_requests_for_elevator(&self, name: &String) -> Option<ElevatorOrders> {
-        let mut requests = [Order {
-            inside_call: false,
-            outside_call_down: false,
-            outside_call_up: false,
+    pub fn get_requests_for_elevator(&self, name: &String) -> Option<ElevatorRequests> {
+        let mut requests = [Request {
+            cab: false,
+            hall_down: false,
+            hall_up: false,
         }; NUMBER_OF_FLOORS];
 
         for (floor, cab_request) in self.elevators.get(name)?.cab_requests.iter().enumerate() {
-            requests[floor].inside_call = *cab_request;
+            requests[floor].cab = *cab_request;
         }
 
         for (floor, hall_request) in self.hall_requests.iter().enumerate() {
-            requests[floor].outside_call_up =
+            requests[floor].hall_up =
                 hall_request.up == HallRequestState::Assigned(name.clone());
-            requests[floor].outside_call_down =
+            requests[floor].hall_down =
                 hall_request.down == HallRequestState::Assigned(name.clone());
         }
 
@@ -188,13 +188,13 @@ pub fn start_master_server() {
                     let master_request = master_elevator_states.hall_requests[floor].clone();
 
                     match (&received_request.up, &master_request.up) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_order(floor as u8, Direction::Up),
+                        (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_request(floor as u8, Direction::Up),
                         (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_elevator_states.hall_requests[floor].up = HallRequestState::Inactive,
                         _ => {},
                     }
 
                     match (&received_request.down, &master_request.down) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_order(floor as u8, Direction::Down),
+                        (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_request(floor as u8, Direction::Down),
                         (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_elevator_states.hall_requests[floor].down = HallRequestState::Inactive,
                         _ => {},
                     }
@@ -212,7 +212,7 @@ pub fn start_master_server() {
 /// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
 pub fn start_slave_client(
     elevio_elevator: &elevio::elev::Elevator,
-    elevator_command_tx: cbc::Sender<ElevatorOrders>,
+    elevator_command_tx: cbc::Sender<ElevatorRequests>,
     elevator_event_rx: cbc::Receiver<ElevatorEvent>,
 ) {
     let rx_channels = inputs::get_input_channels(&elevio_elevator);

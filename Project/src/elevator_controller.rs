@@ -10,8 +10,8 @@ use std::time::{self, Duration};
 const DOOR_OPEN_DURATION: time::Duration = time::Duration::from_secs(3);
 pub const NUMBER_OF_FLOORS: usize = 4;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum States {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum State {
     Idle,
     Moving,
     DoorOpen,
@@ -36,12 +36,13 @@ pub type ElevatorRequests = [Request; NUMBER_OF_FLOORS];
 
 pub struct ElevatorEvent {
     pub direction: Direction,
+    pub state: State,
     pub floor: u8,
 }
 
 // TODO: Ville kanskje vært bedre om man hadde en "ElevatorController" struct
 struct ElevatorState {
-    fsm_state: States,
+    fsm_state: State,
     direction: Direction,
     obstruction: bool,
     last_floor: Option<u8>,
@@ -80,40 +81,40 @@ impl ElevatorState {
             _ => request.cab || request.hall_up || request.hall_down,
         }
     }
-    pub fn next_direction(&self) -> (Direction, States) {
+    pub fn next_direction(&self) -> (Direction, State) {
         // TODO: Flytte ut fra main
         match self.direction {
             Direction::Up => {
                 return if self.requests_above() {
-                    (Direction::Up, States::Moving)
+                    (Direction::Up, State::Moving)
                 } else if self.requests_here(None) {
-                    (Direction::Down, States::DoorOpen)
+                    (Direction::Down, State::DoorOpen)
                 } else if self.requests_below() {
-                    (Direction::Down, States::Moving)
+                    (Direction::Down, State::Moving)
                 } else {
-                    (Direction::Stopped, States::Idle)
+                    (Direction::Stopped, State::Idle)
                 }
             }
             Direction::Down => {
                 return if self.requests_below() {
-                    (Direction::Down, States::Moving)
+                    (Direction::Down, State::Moving)
                 } else if self.requests_here(None) {
-                    (Direction::Up, States::DoorOpen)
+                    (Direction::Up, State::DoorOpen)
                 } else if self.requests_above() {
-                    (Direction::Up, States::Moving)
+                    (Direction::Up, State::Moving)
                 } else {
-                    (Direction::Stopped, States::Idle)
+                    (Direction::Stopped, State::Idle)
                 }
             }
             Direction::Stopped => {
                 return if self.requests_here(None) {
-                    (Direction::Stopped, States::DoorOpen)
+                    (Direction::Stopped, State::DoorOpen)
                 } else if self.requests_above() {
-                    (Direction::Up, States::Moving)
+                    (Direction::Up, State::Moving)
                 } else if self.requests_below() {
-                    (Direction::Down, States::Moving)
+                    (Direction::Down, State::Moving)
                 } else {
-                    (Direction::Stopped, States::Idle)
+                    (Direction::Stopped, State::Idle)
                 }
             }
         }
@@ -152,7 +153,7 @@ fn start_moving(
 
     elevator_state.fsm_state = state;
 
-    if state == States::DoorOpen {
+    if state == State::DoorOpen {
         info!("Stopping in move!");
         elevio_elevator.motor_direction(DIRN_STOP);
         elevator_state.direction = Direction::Stopped;
@@ -185,7 +186,7 @@ pub fn controller_loop(
     let mut door_timer = timer::Timer::init();
 
     let mut elevator_state = ElevatorState {
-        fsm_state: States::Idle,
+        fsm_state: State::Idle,
         direction: Direction::Stopped,
         obstruction: false, // TODO: Check the obstruction state once in the beginning
         last_floor: Some(0), // TODO: Check floor once in the beginning
@@ -201,7 +202,7 @@ pub fn controller_loop(
             recv(command_channel_rx) -> command => {
                 elevator_state.requests = command.unwrap();
 
-                if elevator_state.fsm_state != States::Idle {
+                if elevator_state.fsm_state != State::Idle {
                     continue;
                 }
 
@@ -214,13 +215,13 @@ pub fn controller_loop(
                 elevio_elevator.floor_indicator(floor); // Bruk sync lights her kanskje?
                 elevator_state.last_floor = Some(floor);
 
-                if elevator_state.fsm_state != States::Moving {
+                if elevator_state.fsm_state != State::Moving {
                     continue;
                 }
 
                 if elevator_state.should_stop() {
                     info!("Stopping.");
-                    elevator_state.fsm_state = States::DoorOpen;
+                    elevator_state.fsm_state = State::DoorOpen;
                     elevio_elevator.motor_direction(DIRN_STOP);
                     elevio_elevator.door_light(true);
                     info!("Door open.");
@@ -233,7 +234,7 @@ pub fn controller_loop(
 
                 elevio_elevator.motor_direction(DIRN_STOP);
 
-                elevator_state.fsm_state = States::OutOfOrder;
+                elevator_state.fsm_state = State::OutOfOrder;
             },
             recv(rx_channels.obstruction_rx) -> obstruction_switch => {
                 elevator_state.obstruction = obstruction_switch.unwrap();
@@ -245,7 +246,11 @@ pub fn controller_loop(
                     continue;
                 }
 
-                elevator_event_tx.send(ElevatorEvent { direction: elevator_state.direction, floor:elevator_state.last_floor.unwrap() }).unwrap();
+                elevator_event_tx.send(ElevatorEvent { 
+                    direction: elevator_state.direction,
+                    state: elevator_state.fsm_state,
+                    floor: elevator_state.last_floor.unwrap(),
+                }).unwrap();
 
                 info!("Door closed.");
                 elevio_elevator.door_light(false);

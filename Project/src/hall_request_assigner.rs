@@ -1,11 +1,52 @@
-use std::process::Command;
+use std::{collections::HashMap, process::Command};
 
-pub fn run_hall_request_assigner(hall_requests: &str, states: &str) -> Result<String, String> {
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+pub enum Behaviour {
+    #[serde(rename = "idle")]
+    Idle,
+    #[serde(rename = "moving")]
+    Moving,
+    #[serde(rename = "doorOpen")]
+    DoorOpen,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum Direction {
+    #[serde(rename = "up")]
+    Up,
+    #[serde(rename = "down")]
+    Down,
+    #[serde(rename = "stop")]
+    Stop,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct State {
+    pub behaviour: Behaviour,
+    pub floor: u8,
+    pub direction: Direction,
+    #[serde(rename = "cabRequests")]
+    pub cab_requests: [bool; 4],
+}
+
+pub type States = HashMap<String, State>;
+
+pub type HallRequests = [(bool, bool); 4];
+
+#[derive(Serialize, Deserialize)]
+pub struct HallRequestsAssignerInput {
+    #[serde(rename = "hallRequests")]
+    pub hall_requests: HallRequests,
+    pub states: States,
+}
+
+pub type HallRequestsAssignerOutput = HashMap<String, HallRequests>;
+
+pub fn run_hall_request_assigner(input: HallRequestsAssignerInput) -> Result<HallRequestsAssignerOutput, String> {
     // Construct the input JSON
-    let input_json = format!(
-        r#"{{"hallRequests":{},"states":{}}}"#,
-        hall_requests, states
-    );
+    let input_json = serde_json::to_string(&input).unwrap();
 
     // Run the hall_request_assigner program with the provided input
     let output = Command::new("./hall_request_assigner")
@@ -16,20 +57,8 @@ pub fn run_hall_request_assigner(hall_requests: &str, states: &str) -> Result<St
 
     // Return the output of the program
     if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        Ok(serde_json::from_slice(&output.stdout).unwrap())
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
-}
-
-fn main() {
-    // Example input
-    let hall_requests = r#"[[false,false],[true,false],[false,false],[false,true]]"#;
-    let states = r#"{"one":{"behaviour":"moving","floor":2,"direction":"up","cabRequests":[false,false,true,true]},"two":{"behaviour":"idle","floor":0,"direction":"stop","cabRequests":[false,false,false,false]}}"#;
-
-    // Run the hall_request_assigner function and print the result
-    match run_hall_request_assigner(hall_requests, states) {
-        Ok(output) => println!("{}", output),
-        Err(error) => eprintln!("Error: {}", error),
     }
 }

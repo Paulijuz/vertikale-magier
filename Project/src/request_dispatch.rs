@@ -8,8 +8,9 @@ use std::array;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
 
-use crate::elevator_controller::NUMBER_OF_FLOORS;
+use crate::elevator_controller::{State, NUMBER_OF_FLOORS};
 use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorRequests, Request};
+use crate::hall_request_assigner::{self as hra, HallRequestsAssignerInput};
 use crate::inputs;
 use crate::network::advertiser::Advertiser;
 use crate::network::socket::{Client, Host};
@@ -18,8 +19,28 @@ use crate::network::socket::{Client, Host};
 pub struct SingleElevatorState {
     pub name: String,
     pub direction: Direction,
+    pub state: State,
     pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
+}
+
+impl From<&SingleElevatorState> for hra::State {
+    fn from(single_elevator_state: &SingleElevatorState) -> Self {
+        hra::State { 
+            behaviour: match single_elevator_state.state {
+                State::DoorOpen => hra::Behaviour::DoorOpen,
+                State::Moving => hra::Behaviour::Moving,
+                _ => hra::Behaviour::Idle,
+            }, 
+            floor: single_elevator_state.floor, 
+            direction: match single_elevator_state.direction {
+                Direction::Down => hra::Direction::Down,
+                Direction::Stopped => hra::Direction::Stop,
+                Direction::Up => hra::Direction::Up,
+            }, 
+            cab_requests: single_elevator_state.cab_requests, 
+        }
+    }
 }
 
 impl fmt::Display for SingleElevatorState {
@@ -100,39 +121,30 @@ impl AllElevatorStates {
 
     // Velger beste heis for en bestilling
     pub fn assign_request(&mut self, floor: u8, direction: Direction) {
-        // TODO: Skriv om til å bruke utdelt program.
-
-        //gir tilgang til å mutere heisen, tar også inn etasjen forespørselen skal til og retningen
-        //heisen skal.
-        let mut best_elevator: Option<String> = None;
-        let mut best_distance = u8::MAX;
-
-        for elevator in self.elevators.values() {
-            let distance = (elevator.floor as i8 - floor as i8).abs() as u8;
-
-            debug!("Elevator {} is {} floors away from floor nr. {}.", elevator.name, distance, floor);
-
-            if distance < best_distance {
-                best_distance = distance;
-                best_elevator = Some(elevator.name.clone());
-            }
+        match direction {
+            Direction::Up => self.hall_requests[floor as usize].down = HallRequestState::Requested,
+            Direction::Down => self.hall_requests[floor as usize].down = HallRequestState::Requested,
+            _ => panic!("Tried to assign request with invalid direction"),
         }
 
-        if let Some(name) = best_elevator {
-            match direction {
-                Direction::Down => {
-                    self.hall_requests[floor as usize].down =
-                        HallRequestState::Assigned(name.clone())
-                }
-                Direction::Up => {
-                    self.hall_requests[floor as usize].up = HallRequestState::Assigned(name.clone())
-                }
-                _ => panic!("Prøvde a tildele en bestilling med ugyldig rettning."),
-            }
+        let hall_requests= self.hall_requests.clone().map(|request| (request.up != HallRequestState::Inactive, request.down != HallRequestState::Inactive));
+        let states = self.elevators.iter().map(|(k, v)| (k.to_owned(), v.into())).collect();
 
-            info!("Tildelte oppdrag til heis {}: {}", &name, floor);
-        } else {
-            error!("Kunne ikke tildele ordre til heis");
+        let assignments = hra::run_hall_request_assigner(HallRequestsAssignerInput {
+            hall_requests,
+            states,
+        }).unwrap();
+
+        for (id, assigned_hall_requests) in assignments.iter() {
+            for (floor, (up, down)) in assigned_hall_requests.iter().enumerate() {
+                if *up {
+                    self.hall_requests[floor].up = HallRequestState::Assigned(id.to_string());
+                }
+
+                if *down {
+                    self.hall_requests[floor].down = HallRequestState::Assigned(id.to_string());
+                }
+            }
         }
     }
 
@@ -232,6 +244,7 @@ pub fn start_slave_client(
 
     let mut local_elevator_state = SingleElevatorState {
         name: name.clone(),
+        state: State::Idle,
         cab_requests: [false; 4],
         direction: Direction::Up,
         floor: 0,
@@ -248,6 +261,7 @@ pub fn start_slave_client(
                 local_elevator_state.floor = elevator_event.floor;
                 local_elevator_state.direction = elevator_event.direction;
                 local_elevator_state.cab_requests[elevator_event.floor as usize] = false;
+                local_elevator_state.state = elevator_event.state;
 
                 // Marker ordre i etasje som fullførte
                 all_elevator_states.hall_requests[elevator_event.floor as usize].up = HallRequestState::Inactive;

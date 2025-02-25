@@ -83,7 +83,6 @@ impl ElevatorState {
         }
     }
     pub fn next_direction(&self) -> (Direction, State) {
-        // TODO: Flytte ut fra main
         match self.direction {
             Direction::Up => {
                 return if self.requests_above() {
@@ -158,7 +157,7 @@ fn start_moving(
         info!("Stopping in move!");
         elevio_elevator.motor_direction(DIRN_STOP);
         elevator_state.direction = Direction::Stopped;
-        door_timer.start(Duration::from_secs(3));
+        door_timer.start(DOOR_OPEN_DURATION);
         return;
     }
 
@@ -205,7 +204,7 @@ pub fn controller_loop(
 
                 if elevator_state.fsm_state != State::Idle {
                     continue;
-                }      
+                }
 
                 start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
             },
@@ -247,17 +246,17 @@ pub fn controller_loop(
                     continue;
                 }
 
-                elevator_event_tx.send(ElevatorEvent {
-                    direction: elevator_state.direction,
-                    state: elevator_state.fsm_state,
-                    floor: elevator_state.last_floor.unwrap(),
-                }).unwrap();
-
                 info!("Door closed.");
                 elevio_elevator.door_light(false);
 
                 start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
             },
         }
+        
+        elevator_event_tx.send(ElevatorEvent {
+            direction: elevator_state.direction,
+            state: elevator_state.fsm_state,
+            floor: elevator_state.last_floor.unwrap(),
+        }).unwrap();
     }
 }

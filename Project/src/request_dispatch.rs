@@ -1,6 +1,6 @@
 use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorRequests, Request};
 use crate::elevator_controller::{State, NUMBER_OF_FLOORS};
-use crate::hall_request_assigner::{self as hra, HallRequestsAssignerInput};
+use crate::hall_request_assigner as hra;
 use crate::inputs;
 use crate::network::advertiser::Advertiser;
 use crate::network::socket::{Client, Host};
@@ -49,7 +49,11 @@ impl fmt::Display for SingleElevatorState {
         writeln!(
             f,
             "Navn: {}\nTilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger: {:?}",
-            self.name, self.state, self.direction, self.floor + 1, self.cab_requests
+            self.name,
+            self.state,
+            self.direction,
+            self.floor + 1,
+            self.cab_requests
         )
     }
 }
@@ -144,7 +148,7 @@ impl AllElevatorStates {
             .map(|(k, v)| (k.to_owned(), v.into()))
             .collect();
 
-        let assignments = hra::run_hall_request_assigner(HallRequestsAssignerInput {
+        let assignments = hra::run_hall_request_assigner(hra::HallRequestsStates {
             hall_requests,
             states,
         })

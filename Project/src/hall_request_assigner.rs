@@ -36,30 +36,29 @@ pub type States = HashMap<String, State>;
 pub type HallRequests = [(bool, bool); NUMBER_OF_FLOORS];
 
 #[derive(Serialize, Deserialize)]
-pub struct HallRequestsAssignerInput {
+pub struct HallRequestsStates {
     #[serde(rename = "hallRequests")]
     pub hall_requests: HallRequests,
     pub states: States,
 }
 
-pub type HallRequestsAssignerOutput = HashMap<String, HallRequests>;
+pub type HallRequestsAssignments = HashMap<String, HallRequests>;
 
 pub fn run_hall_request_assigner(
-    input: HallRequestsAssignerInput,
-) -> Result<HallRequestsAssignerOutput, String> {
-    // Construct the input JSON
+    input: HallRequestsStates,
+) -> Result<HallRequestsAssignments, String> {
     let input_json = serde_json::to_string(&input).unwrap();
 
-    // Run the hall_request_assigner program with the provided input
     let output = Command::new("./hall_request_assigner")
         .arg("--input")
         .arg(&input_json)
         .output()
         .expect("Failed to start hall_request_assigner");
 
-    // Return the output of the program
+    let assignments = serde_json::from_slice(&output.stdout).unwrap();
+
     if output.status.success() {
-        Ok(serde_json::from_slice(&output.stdout).unwrap())
+        Ok(assignments)
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }

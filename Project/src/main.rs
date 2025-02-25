@@ -4,6 +4,7 @@ mod light_sync;
 mod network;
 mod request_dispatch;
 mod timer;
+mod hall_request_assigner;
 
 use crossbeam_channel as cbc;
 use driver_rust::elevio;

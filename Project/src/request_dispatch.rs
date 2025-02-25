@@ -11,9 +11,11 @@ use std::net::SocketAddrV4;
 use crate::elevator_controller::{State, NUMBER_OF_FLOORS};
 use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorRequests, Request};
 use crate::hall_request_assigner::{self as hra, HallRequestsAssignerInput};
-use crate::inputs;
+use crate::{inputs, request_dispatch};
 use crate::network::advertiser::Advertiser;
 use crate::network::socket::{Client, Host};
+use crate::light_sync::sync_call_lights;
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleElevatorState {
@@ -299,6 +301,10 @@ pub fn start_slave_client(
 
                 all_elevator_states = master_state;
                 all_elevator_states.elevators.insert(name.clone(), local_elevator_state.clone());
+
+                let requests = all_elevator_states.get_requests_for_elevator(&name).unwrap();
+                sync_call_lights(&elevio_elevator, &requests);
+
 
                 info!("Received state from master:\n{all_elevator_states}");
 

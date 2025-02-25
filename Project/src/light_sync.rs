@@ -10,3 +10,4 @@ pub fn sync_call_lights(elevator: &Elevator, requests: &ElevatorRequests) {
         elevator.call_button_light(floor, CAB, request.cab);
     }
 }
+

@@ -1,0 +1,34 @@
+{
+  "elevators": {
+    "TestHeis": {
+      "name": "TestHeis",
+      "direction": "Up",
+      "state": "Idle",
+      "floor": 3,
+      "cab_requests": [
+        false,
+        false,
+        true,
+        false
+      ]
+    }
+  },
+  "hall_requests": [
+    {
+      "up": "Inactive",
+      "down": "Inactive"
+    },
+    {
+      "up": "Inactive",
+      "down": "Inactive"
+    },
+    {
+      "up": "Inactive",
+      "down": "Inactive"
+    },
+    {
+      "up": "Inactive",
+      "down": "Inactive"
+    }
+  ]
+}

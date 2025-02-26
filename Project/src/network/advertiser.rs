@@ -1,5 +1,6 @@
 use super::socket::{Client, SendableType};
 use crate::timer::Timer;
+use crate::network::elevator_monitor::ElevatorMonitor;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -104,6 +105,9 @@ fn run_advertiser<T: SendableType + Clone>(
     let mut timer = Timer::init();
     let mut is_advertising = false;
 
+    let elevator_monitor = ElevatorMonitor::new();
+
+
     loop {
         select! {
             recv(control_channel_rx) -> command => {
@@ -132,6 +136,7 @@ fn run_advertiser<T: SendableType + Clone>(
                 }
 
                 client.sender().send(advertisment.clone()).unwrap();
+                elevator_monitor.send_heartbeat(advertisment.sender_id);
                 timer.start(ADVERTISING_INTERVAL);
             },
             recv(client.receiver()) -> data => {
@@ -142,6 +147,7 @@ fn run_advertiser<T: SendableType + Clone>(
                 }
 
                 receive_channel_tx.send((address, received_advertisment.data)).unwrap();
+                elevator_monitor.send_heartbeat(received_advertisment.sender_id);
             },
         }
     }

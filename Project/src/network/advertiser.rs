@@ -101,7 +101,7 @@ fn run_advertiser<T: SendableType + Clone>(
 
     let client: Client<Advertisment<T>> =
         Client::new_multicast_client(ADVERTISING_IP, ADVERTISING_PORT);
-    let mut timer = Timer::init();
+    let mut timer = Timer::init(ADVERTISING_INTERVAL);
     let mut is_advertising = false;
 
     loop {
@@ -114,7 +114,7 @@ fn run_advertiser<T: SendableType + Clone>(
                         }
 
                         is_advertising = true;
-                        timer.start(ADVERTISING_INTERVAL);
+                        timer.start();
                     },
                     AdvertiserCommand::Stop => is_advertising = false,
                     AdvertiserCommand::SetAdvertisment(new_advertisment_data) => {
@@ -132,7 +132,7 @@ fn run_advertiser<T: SendableType + Clone>(
                 }
 
                 client.sender().send(advertisment.clone()).unwrap();
-                timer.start(ADVERTISING_INTERVAL);
+                timer.start();
             },
             recv(client.receiver()) -> data => {
                 let (address, received_advertisment) = data.unwrap();

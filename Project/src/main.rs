@@ -12,7 +12,7 @@ use elevator_controller::controller_loop;
 use env_logger;
 use log::{error, info, LevelFilter};
 use request_dispatch::{start_master_server, start_slave_client};
-use std::{env, thread::spawn};
+use std::{env, process::exit, thread::spawn};
 
 fn main() {
     env_logger::Builder::new()
@@ -40,5 +40,6 @@ fn main() {
         return;
     }
 
-    error!("Programmet må startes som enten master eller slave. Kjør 'cargo run master' for master eller 'cargo run slave' for slave.")
+    error!("Programmet må startes som enten master eller slave. Kjør 'cargo run master' for master eller 'cargo run slave' for slave.");
+    exit(1);
 }

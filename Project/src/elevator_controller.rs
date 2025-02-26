@@ -1,13 +1,12 @@
 use crate::inputs;
-use crate::timer;
+use crate::timer::Timer;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
-use driver_rust::elevio::elev::{DIRN_DOWN, DIRN_STOP, DIRN_UP};
-use log::info;
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
-use std::time::{self, Duration};
+use std::time::Duration;
 
-const DOOR_OPEN_DURATION: time::Duration = time::Duration::from_secs(3);
+const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 pub const NUMBER_OF_FLOORS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,7 +31,7 @@ pub struct Request {
     pub cab: bool,
 }
 
-pub type  ElevatorRequests = [Request; NUMBER_OF_FLOORS];
+pub type Requests = [Request; NUMBER_OF_FLOORS];
 
 pub struct ElevatorEvent {
     pub direction: Direction,
@@ -40,18 +39,34 @@ pub struct ElevatorEvent {
     pub floor: u8,
 }
 
-// TODO: Ville kanskje vært bedre om man hadde en "ElevatorController" struct
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-struct ElevatorState {
+#[derive(Debug, Clone)]
+struct ElevatorController<'e> {
+    elevio_driver: &'e elevio::elev::Elevator,
+    door_timer: Timer,
     fsm_state: State,
     direction: Direction,
     obstruction: bool,
     last_floor: Option<u8>,
-    requests: ElevatorRequests,
+    requests: Requests,
 }
 
-impl ElevatorState {
-    pub fn requests_below(&self) -> bool {
+impl<'e> ElevatorController<'e> {
+    fn new(elevio_driver: &'e elevio::elev::Elevator) -> Self {
+        Self {
+            elevio_driver,
+            door_timer: Timer::init(DOOR_OPEN_DURATION),
+            fsm_state: State::Idle,
+            direction: Direction::Stopped,
+            obstruction: true, // Assume worst until we hear otherwise from driver
+            last_floor: Some(0),
+            requests: [Request {
+                cab: false,
+                hall_up: false,
+                hall_down: false,
+            }; NUMBER_OF_FLOORS],
+        }
+    }
+    fn requests_below(&self) -> bool {
         let Some(floor) = self.last_floor else {
             return false;
         };
@@ -60,7 +75,7 @@ impl ElevatorState {
             .iter()
             .any(|request| request.cab || request.hall_down || request.hall_up)
     }
-    pub fn requests_above(&self) -> bool {
+    fn requests_above(&self) -> bool {
         let Some(floor) = self.last_floor else {
             return false;
         };
@@ -69,7 +84,7 @@ impl ElevatorState {
             .iter()
             .any(|request| request.cab || request.hall_down || request.hall_up)
     }
-    pub fn requests_here(&self, direction: Option<Direction>) -> bool {
+    fn requests_here(&self, direction: Option<Direction>) -> bool {
         let Some(floor) = self.last_floor else {
             return false;
         };
@@ -78,15 +93,17 @@ impl ElevatorState {
 
         match direction {
             Some(Direction::Up) => request.cab || request.hall_up,
-            Some(Direction::Down) => request.cab || request.hall_up,
+            Some(Direction::Down) => request.cab || request.hall_down,
             _ => request.cab || request.hall_up || request.hall_down,
         }
     }
-    pub fn next_direction(&self) -> (Direction, State) {
+    fn next_direction(&self) -> (Direction, State) {
         match self.direction {
             Direction::Up => {
                 return if self.requests_above() {
                     (Direction::Up, State::Moving)
+                } else if self.requests_here(Some(Direction::Up)) {
+                    (Direction::Up, State::DoorOpen)
                 } else if self.requests_here(None) {
                     (Direction::Down, State::DoorOpen)
                 } else if self.requests_below() {
@@ -98,6 +115,8 @@ impl ElevatorState {
             Direction::Down => {
                 return if self.requests_below() {
                     (Direction::Down, State::Moving)
+                } else if self.requests_here(Some(Direction::Down)) {
+                    (Direction::Down, State::DoorOpen)
                 } else if self.requests_here(None) {
                     (Direction::Up, State::DoorOpen)
                 } else if self.requests_above() {
@@ -119,7 +138,7 @@ impl ElevatorState {
             }
         }
     }
-    pub fn should_stop(&self) -> bool {
+    fn should_stop(&self) -> bool {
         let Some(floor) = self.last_floor else {
             return false;
         };
@@ -139,134 +158,132 @@ impl ElevatorState {
             _ => return true,
         }
     }
-}
+    fn transision_to_moving(&mut self) {
+        debug!("Bytter til tilstand \"kjører\".");
+        self.fsm_state = State::Moving;
 
-// TODO: Denne funksjonen gjør fremdeles mye rart
-fn start_moving(
-    elevator_state: &mut ElevatorState,
-    elevio_elevator: &elevio::elev::Elevator,
-    door_timer: &mut timer::Timer,
-) {
-    let (direction, state) = elevator_state.next_direction();
-
-    info!("{direction:?} {state:?}");
-
-    elevator_state.fsm_state = state;
-
-    if state == State::DoorOpen {
-        info!("Stopping in move!");
-        elevio_elevator.motor_direction(DIRN_STOP);
-        elevator_state.direction = Direction::Stopped;
-        door_timer.start(DOOR_OPEN_DURATION);
-        return;
+        match self.direction {
+            Direction::Up => {
+                self.elevio_driver.motor_direction(elevio::elev::DIRN_UP);
+                self.direction = Direction::Up;
+            }
+            Direction::Down => {
+                self.elevio_driver.motor_direction(elevio::elev::DIRN_DOWN);
+                self.direction = Direction::Down;
+            }
+            _ => panic!("Prøvde å bytte til tilstand \"kjører\" uten at heisen trenger å kjøre.")
+        }
     }
+    fn transision_to_door_open(&mut self) {
+        debug!("Bytter til tilstand \"dør åpen\".");
+        self.fsm_state = State::DoorOpen;
 
-    match direction {
-        Direction::Up => {
-            elevio_elevator.motor_direction(DIRN_UP);
-            elevator_state.direction = Direction::Up;
-        }
-        Direction::Down => {
-            elevio_elevator.motor_direction(DIRN_DOWN);
-            elevator_state.direction = Direction::Down;
-        }
-        Direction::Stopped => {
-            elevio_elevator.motor_direction(DIRN_STOP);
-            elevator_state.direction = Direction::Stopped;
-        }
+        self.elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
+        self.elevio_driver.door_light(true);
+
+        debug!("Dør åpen.");
+        self.door_timer.start();
+    }
+    fn transision_to_idle(&mut self) {
+        debug!("Bytter til tilstand \"inaktiv\".");
+        self.fsm_state = State::Idle;
     }
 }
 
 pub fn controller_loop(
     elevio_elevator: &elevio::elev::Elevator,
-    command_channel_rx: cbc::Receiver<ElevatorRequests>,
+    command_channel_rx: cbc::Receiver<Requests>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
     let rx_channels = inputs::get_input_channels(&elevio_elevator);
-    let mut door_timer = timer::Timer::init();
-
-    let mut elevator_state = ElevatorState {
-        fsm_state: State::Idle,
-        direction: Direction::Stopped,
-        obstruction: false, // TODO: Check the obstruction state once in the beginning
-        last_floor: Some(0), // TODO: Check floor once in the beginning
-        requests: [Request {
-            cab: false,
-            hall_up: false,
-            hall_down: false,
-        }; NUMBER_OF_FLOORS],
-    };
-
+    let mut controller = ElevatorController::new(&elevio_elevator);
+    
     loop {
         cbc::select! {
             recv(command_channel_rx) -> command => {
-                elevator_state.requests = command.unwrap();
+                let requests = command.unwrap();
+                debug!("Recieved new requests: {:?}", requests);
 
-                if elevator_state.fsm_state != State::Idle {
+                controller.requests = requests;
+
+                if controller.fsm_state != State::Idle {
                     continue;
                 }
 
-                start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
+                let (next_direction, next_state) = controller.next_direction();
+                controller.direction = next_direction;
 
-                elevator_event_tx.send(ElevatorEvent {
-                    direction: elevator_state.direction,
-                    state: elevator_state.fsm_state,
-                    floor: elevator_state.last_floor.unwrap(),
-                }).unwrap();
+                match next_state {
+                    State::DoorOpen => controller.transision_to_door_open(),
+                    State::Moving => controller.transision_to_moving(),
+                    State::Idle => controller.transision_to_idle(),
+                    _ => {},
+                }
+
+                // elevator_event_tx.send(ElevatorEvent {
+                //     direction: controller.direction,
+                //     state: controller.fsm_state,
+                //     floor: controller.last_floor.unwrap(),
+                // }).unwrap();
             },
             recv(rx_channels.floor_sensor_rx) -> floor => {
                 let floor = floor.unwrap();
-                info!("Floor: {floor}");
+                debug!("Detekterte etasje: {floor}");
 
-                elevio_elevator.floor_indicator(floor); // Bruk sync lights her kanskje?
-                elevator_state.last_floor = Some(floor);
+                elevio_elevator.floor_indicator(floor); // TODO: Bruk sync lights her kanskje?
+                controller.last_floor = Some(floor);
 
-                if elevator_state.fsm_state != State::Moving {
+                if controller.fsm_state != State::Moving {
                     continue;
                 }
 
-                if elevator_state.should_stop() {
-                    info!("Stopping.");
-                    elevator_state.fsm_state = State::DoorOpen;
-                    elevio_elevator.motor_direction(DIRN_STOP);
-                    elevio_elevator.door_light(true);
-                    info!("Door open.");
-                    door_timer.start(DOOR_OPEN_DURATION);
+                if controller.should_stop() {
+                    controller.transision_to_door_open();
                 }
 
                 elevator_event_tx.send(ElevatorEvent {
-                    direction: elevator_state.direction,
-                    state: elevator_state.fsm_state,
-                    floor: elevator_state.last_floor.unwrap(),
+                    direction: controller.direction,
+                    state: controller.fsm_state,
+                    floor: controller.last_floor.unwrap(),
                 }).unwrap();
             },
             recv(rx_channels.stop_button_rx) -> stop_button => {
                 let stop_button = stop_button.unwrap();
-                info!("Stop button: {:}", stop_button);
+                debug!("Detekterte stopknapp: {:}", stop_button);
 
-                elevio_elevator.motor_direction(DIRN_STOP);
+                elevio_elevator.motor_direction(elevio::elev::DIRN_STOP);
 
-                elevator_state.fsm_state = State::OutOfOrder;
+                controller.fsm_state = State::OutOfOrder;
             },
             recv(rx_channels.obstruction_rx) -> obstruction_switch => {
-                elevator_state.obstruction = obstruction_switch.unwrap();
-                info!("Obstruction: {:}", elevator_state.obstruction);
+                controller.obstruction = obstruction_switch.unwrap();
+                debug!("Detekterte obstruksjon: {:}", controller.obstruction);
             },
-            recv(door_timer.timeout_channel()) -> _ => {
-                if elevator_state.obstruction {
-                    door_timer.start(DOOR_OPEN_DURATION);
+            recv(controller.door_timer.timeout_channel()) -> _ => {
+                if controller.obstruction {
+                    debug!("Dør obstruert!");
+                    controller.door_timer.start();
                     continue;
                 }
 
-                info!("Door closed.");
                 elevio_elevator.door_light(false);
+                debug!("Dør lukket.");
 
-                start_moving(&mut elevator_state, elevio_elevator, &mut door_timer);
+                let (next_direction, next_state) = controller.next_direction();
+                controller.direction = next_direction;
+                dbg!(next_direction);
+                
+                match next_state {
+                    State::DoorOpen => controller.transision_to_door_open(),
+                    State::Moving => controller.transision_to_moving(),
+                    State::Idle => controller.transision_to_idle(),
+                    _ => {},
+                }
 
                 elevator_event_tx.send(ElevatorEvent {
-                    direction: elevator_state.direction,
-                    state: elevator_state.fsm_state,
-                    floor: elevator_state.last_floor.unwrap(),
+                    direction: controller.direction,
+                    state: controller.fsm_state,
+                    floor: controller.last_floor.unwrap(),
                 }).unwrap();
             },
         }

@@ -1,4 +1,4 @@
-use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorRequests, Request};
+use crate::elevator_controller::{Direction, ElevatorEvent, Requests, Request};
 use crate::elevator_controller::{State, NUMBER_OF_FLOORS};
 use crate::hall_request_assigner as hra;
 use crate::inputs;
@@ -9,7 +9,7 @@ use crossbeam_channel as cbc;
 use crossbeam_channel::select;
 use driver_rust::elevio;
 use driver_rust::elevio::elev::{CAB, HALL_DOWN, HALL_UP};
-use log::{debug, error, info};
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::array;
 use std::collections::{HashMap, HashSet};
@@ -167,7 +167,7 @@ impl AllElevatorStates {
         }
     }
 
-    pub fn get_requests_for_elevator(&self, name: &String) -> Option<ElevatorRequests> {
+    pub fn get_requests_for_elevator(&self, name: &String) -> Option<Requests> {
         let mut requests = [Request {
             cab: false,
             hall_down: false,
@@ -242,7 +242,7 @@ pub fn start_master_server() {
 /// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
 pub fn start_slave_client(
     elevio_elevator: &elevio::elev::Elevator,
-    elevator_command_tx: cbc::Sender<ElevatorRequests>,
+    elevator_command_tx: cbc::Sender<Requests>,
     elevator_event_rx: cbc::Receiver<ElevatorEvent>,
 ) {
     let rx_channels = inputs::get_input_channels(&elevio_elevator);

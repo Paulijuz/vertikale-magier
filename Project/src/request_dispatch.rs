@@ -249,19 +249,18 @@ pub fn start_master_server() {
                     }
                 }
 
-                // Lagre tilstanden til master_elevator_states til back-upen
-                if let Err(e) = save_state_to_file(&master_elevator_states, "backup.json") {
-                    error!("klarte ikke lagre tilstanden: {}", e);
-                    info!("master_elevator_states er lagret i back-upen")
-                }
-
                 // Informere alle slaver om nye bestillinger
                 for slave_address in &slave_addresses {
                     host.send_channel().send((*slave_address, master_elevator_states.to_owned())).unwrap();
                 }
             }
         }
+        if let Err(e) = save_state_to_file(&master_elevator_states, "backup.json") {
+            error!("klarte ikke lagre tilstanden: {}", e);
+            info!("master_elevator_states er lagret i back-upen")
+        }
     }
+    
 }
 
 pub fn send_state_to_maser(
@@ -309,11 +308,6 @@ pub fn start_slave_client(
 
     let mut all_elevator_states = AllElevatorStates::new();
     
-    //lagre tilstanden i back-up
-    if let Ok(state) = load_state_from_file("backup.json") {
-        all_elevator_states = state;
-        info!("lastet inn alle tilstandene i back-up");
-    }
 
 
     loop {
@@ -342,12 +336,6 @@ pub fn start_slave_client(
                 if let Some(requests) = all_elevator_states.get_requests_for_elevator(&name) {
                     elevator_command_tx.send(requests).unwrap();
                 }
-
-                 // lagre tilstanden til back-upen etter oppdatert ordreliste
-                if let Err(e) = save_state_to_file(&all_elevator_states, "backup.json") {
-                    error!("klarte ikke lagre i back-upen etter oppdatert liste: {}", e);
-                    info!("ordreliste lagret i back-up")
-                }
                 // Informer master om den nye tilstanden
                 send_state_to_maser(&client, name.clone(), all_elevator_states.clone(), local_elevator_state.clone());
             },
@@ -370,10 +358,6 @@ pub fn start_slave_client(
                 all_elevator_states.elevators.insert(name.clone(), local_elevator_state.clone());
                 client.sender().send(all_elevator_states.clone()).unwrap();
 
-                 // sendes til back-up
-                 if let Err(e) = save_state_to_file(&all_elevator_states, "backup.json") {
-                    error!("klarte ikke lagre den nye bestillingen i back-up: {}", e);
-                }
             },
             recv(client.receiver()) -> message => {
                 let (_, master_state) = message.unwrap();
@@ -388,11 +372,12 @@ pub fn start_slave_client(
                     sync_call_lights(&elevio_elevator, &requests);
                     elevator_command_tx.send(requests).unwrap();
                 }
-                if let Err(e) = save_state_to_file(&all_elevator_states, "backup.json"){
-                    error!("Klarte ikke sende den nye bestillingslista til heiskontrolleren i back-up: {}", e);
-                    info!("Sendt den nye bestillingslista til heiskontrolleren i back-up")
-                }
+                
             },
+        }
+        if let Err(e) = save_state_to_file(&all_elevator_states, "backup.json"){
+            error!("Klarte ikke sende den nye bestillingslista til heiskontrolleren i back-up: {}", e);
+            info!("Sendt den nye bestillingslista til heiskontrolleren i back-up")
         }
     }
 }

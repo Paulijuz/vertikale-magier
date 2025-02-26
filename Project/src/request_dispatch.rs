@@ -1,7 +1,8 @@
-use crate::elevator_controller::{Direction, ElevatorEvent, Requests, Request};
+use crate::elevator_controller::{Direction, ElevatorEvent, Request, Requests};
 use crate::elevator_controller::{State, NUMBER_OF_FLOORS};
 use crate::hall_request_assigner as hra;
 use crate::inputs;
+use crate::light_sync::sync_call_lights;
 use crate::network::advertiser::Advertiser;
 use crate::network::socket::{Client, Host};
 use core::fmt;
@@ -14,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::array;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
-use crate::light_sync::sync_call_lights;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleElevatorState {
@@ -247,8 +247,15 @@ pub fn start_master_server() {
     }
 }
 
-pub fn send_state_to_maser(client: &Client<AllElevatorStates>, name: String, mut all_elevator_states: AllElevatorStates, local_elevator_state: SingleElevatorState) {
-    all_elevator_states.elevators.insert(name, local_elevator_state);
+pub fn send_state_to_maser(
+    client: &Client<AllElevatorStates>,
+    name: String,
+    mut all_elevator_states: AllElevatorStates,
+    local_elevator_state: SingleElevatorState,
+) {
+    all_elevator_states
+        .elevators
+        .insert(name, local_elevator_state);
     all_elevator_states.iteration += 1;
     client.sender().send(all_elevator_states).unwrap();
 }

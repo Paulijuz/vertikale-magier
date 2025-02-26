@@ -19,13 +19,11 @@ fn main() {
         .filter_level(LevelFilter::Trace)
         .init();
 
-        use std::env;
-
     let port: u16 = env::args()
         .nth(1)
         .and_then(|arg| arg.parse().ok())
         .unwrap_or(15657);
-        
+
     info!("Bruker port: {port}");
 
     if env::args().any(|arg| arg == "master") {

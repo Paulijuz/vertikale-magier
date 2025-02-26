@@ -171,7 +171,7 @@ impl<'e> ElevatorController<'e> {
                 self.elevio_driver.motor_direction(elevio::elev::DIRN_DOWN);
                 self.direction = Direction::Down;
             }
-            _ => panic!("Prøvde å bytte til tilstand \"kjører\" uten at heisen trenger å kjøre.")
+            _ => panic!("Prøvde å bytte til tilstand \"kjører\" uten at heisen trenger å kjøre."),
         }
     }
     fn transision_to_door_open(&mut self) {
@@ -197,7 +197,7 @@ pub fn controller_loop(
 ) {
     let rx_channels = inputs::get_input_channels(&elevio_elevator);
     let mut controller = ElevatorController::new(&elevio_elevator);
-    
+
     loop {
         cbc::select! {
             recv(command_channel_rx) -> command => {
@@ -205,14 +205,14 @@ pub fn controller_loop(
                 debug!("Recieved new requests: {:?}", requests);
 
                 controller.requests = requests;
-                
+
                 if controller.fsm_state != State::Idle {
                     continue;
                 }
-                
+
                 let (next_direction, next_state) = controller.next_direction();
                 controller.direction = next_direction;
-                
+
                 match next_state {
                     State::DoorOpen => controller.transision_to_door_open(),
                     State::Moving => controller.transision_to_moving(),
@@ -273,7 +273,7 @@ pub fn controller_loop(
                 let (next_direction, next_state) = controller.next_direction();
                 controller.direction = next_direction;
                 dbg!(next_direction);
-                
+
                 match next_state {
                     State::DoorOpen => controller.transision_to_door_open(),
                     State::Moving => controller.transision_to_moving(),

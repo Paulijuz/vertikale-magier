@@ -5,18 +5,22 @@ use crate::inputs;
 use crate::light_sync::sync_call_lights;
 use crate::network::advertiser::Advertiser;
 use crate::network::socket::{Client, Host};
+use crate::backup::{load_state_from_file, save_state_to_file};
+
 use core::fmt;
 use crossbeam_channel as cbc;
 use crossbeam_channel::select;
 use driver_rust::elevio;
 use driver_rust::elevio::elev::{CAB, HALL_DOWN, HALL_UP};
-use log::{debug, info, warn};
+use log::{debug, info, warn, error};
 use serde::{Deserialize, Serialize};
 use std::array;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SingleElevatorState {
     pub name: String,
     pub direction: Direction,
@@ -192,6 +196,18 @@ impl AllElevatorStates {
 
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
 pub fn start_master_server() {
+    // Load state from backup if available
+    let mut master_elevator_states = match load_state_from_file("backup.json") {
+        Ok(states) => {
+            info!("Loaded backup.");
+            states
+        },
+        Err(_) => {
+            info!("No backup found.");
+            AllElevatorStates::new()
+        },
+    };
+
     let host: Host<AllElevatorStates> = Host::new_tcp_host(None);
     info!("Master lytter på port {}", host.port());
 
@@ -199,9 +215,8 @@ pub fn start_master_server() {
     let advertiser = Advertiser::init(host.port());
     advertiser.start_advertising();
 
-    let mut master_elevator_states = AllElevatorStates::new();
     let mut slave_addresses: HashSet<SocketAddrV4> = HashSet::new();
-
+    
     loop {
         select! {
             recv(host.receive_channel()) -> message => {
@@ -232,11 +247,13 @@ pub fn start_master_server() {
                             _ => {},
                         }
                     }
-                } else {
-                    warn!("Mottok utdatert informasjon fra slave. Ignorerer!");
                 }
 
-                master_elevator_states.iteration += 1;
+                // Lagre tilstanden til master_elevator_states til back-upen
+                if let Err(e) = save_state_to_file(&master_elevator_states, "backup.json") {
+                    error!("klarte ikke lagre tilstanden: {}", e);
+                    info!("master_elevator_states er lagret i back-upen")
+                }
 
                 // Informere alle slaver om nye bestillinger
                 for slave_address in &slave_addresses {
@@ -290,6 +307,13 @@ pub fn start_slave_client(
     };
 
     let mut all_elevator_states = AllElevatorStates::new();
+    
+    //lagre tilstanden i back-up
+    if let Ok(state) = load_state_from_file("backup.json") {
+        all_elevator_states = state;
+        info!("lastet inn alle tilstandene i back-up");
+    }
+
 
     loop {
         cbc::select! {
@@ -318,6 +342,11 @@ pub fn start_slave_client(
                     elevator_command_tx.send(requests).unwrap();
                 }
 
+                 // lagre tilstanden til back-upen etter oppdatert ordreliste
+                if let Err(e) = save_state_to_file(&all_elevator_states, "backup.json") {
+                    error!("klarte ikke lagre i back-upen etter oppdatert liste: {}", e);
+                    info!("ordreliste lagret i back-up")
+                }
                 // Informer master om den nye tilstanden
                 send_state_to_maser(&client, name.clone(), all_elevator_states.clone(), local_elevator_state.clone());
             },
@@ -337,6 +366,13 @@ pub fn start_slave_client(
 
                 // Informer master om den nye tilstanden
                 send_state_to_maser(&client, name.clone(), all_elevator_states.clone(), local_elevator_state.clone());
+                all_elevator_states.elevators.insert(name.clone(), local_elevator_state.clone());
+                client.sender().send(all_elevator_states.clone()).unwrap();
+
+                 // sendes til back-up
+                 if let Err(e) = save_state_to_file(&all_elevator_states, "backup.json") {
+                    error!("klarte ikke lagre den nye bestillingen i back-up: {}", e);
+                }
             },
             recv(client.receiver()) -> message => {
                 let (_, master_state) = message.unwrap();
@@ -350,6 +386,10 @@ pub fn start_slave_client(
                 if let Some(requests) = all_elevator_states.get_requests_for_elevator(&name) {
                     sync_call_lights(&elevio_elevator, &requests);
                     elevator_command_tx.send(requests).unwrap();
+                }
+                if let Err(e) = save_state_to_file(&all_elevator_states, "backup.json"){
+                    error!("Klarte ikke sende den nye bestillingslista til heiskontrolleren i back-up: {}", e);
+                    info!("Sendt den nye bestillingslista til heiskontrolleren i back-up")
                 }
             },
         }

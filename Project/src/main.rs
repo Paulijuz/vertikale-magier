@@ -13,8 +13,10 @@ mod light_sync;
 mod network;
 mod request_dispatch;
 mod timer;
+mod backup;
 
 fn main() {
+
     env_logger::Builder::new()
         .filter_level(LevelFilter::Trace)
         .init();
@@ -33,7 +35,7 @@ fn main() {
 
     if env::args().any(|arg| arg == "slave") {
         let elevio_driver: elevio::elev::Elevator =
-            elevio::elev::Elevator::init(&format!("localhost:{}", port), 4).unwrap();
+            elevio::elev::Elevator::init("localhost:15657", 4).unwrap();
 
         let (command_channel_tx, command_channel_rx) = cbc::unbounded();
         let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();
@@ -46,7 +48,7 @@ fn main() {
         start_slave_client(&elevio_driver, command_channel_tx, elevator_event_rx);
         return;
     }
-
+    
     error!("Programmet må startes som enten master eller slave. Kjør 'cargo run master' for master eller 'cargo run slave' for slave.");
     exit(1);
 }

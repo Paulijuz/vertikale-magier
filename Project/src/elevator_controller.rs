@@ -2,7 +2,7 @@ use crate::inputs;
 use crate::timer::Timer;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
-use log::{debug, info};
+use log::debug;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -205,26 +205,27 @@ pub fn controller_loop(
                 debug!("Recieved new requests: {:?}", requests);
 
                 controller.requests = requests;
-
+                
                 if controller.fsm_state != State::Idle {
                     continue;
                 }
-
+                
                 let (next_direction, next_state) = controller.next_direction();
                 controller.direction = next_direction;
-
+                
                 match next_state {
                     State::DoorOpen => controller.transision_to_door_open(),
                     State::Moving => controller.transision_to_moving(),
-                    State::Idle => controller.transision_to_idle(),
                     _ => {},
                 }
 
-                // elevator_event_tx.send(ElevatorEvent {
-                //     direction: controller.direction,
-                //     state: controller.fsm_state,
-                //     floor: controller.last_floor.unwrap(),
-                // }).unwrap();
+                if controller.fsm_state != State::Idle {
+                    elevator_event_tx.send(ElevatorEvent {
+                        direction: controller.direction,
+                        state: controller.fsm_state,
+                        floor: controller.last_floor.unwrap(),
+                    }).unwrap();
+                }
             },
             recv(rx_channels.floor_sensor_rx) -> floor => {
                 let floor = floor.unwrap();

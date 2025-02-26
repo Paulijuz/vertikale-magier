@@ -9,7 +9,7 @@ use crossbeam_channel as cbc;
 use crossbeam_channel::select;
 use driver_rust::elevio;
 use driver_rust::elevio::elev::{CAB, HALL_DOWN, HALL_UP};
-use log::{debug, info};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::array;
 use std::collections::{HashMap, HashSet};
@@ -84,6 +84,7 @@ pub struct HallRequest {
 pub struct AllElevatorStates {
     pub elevators: HashMap<String, SingleElevatorState>, //Liste over alle aktive heiser
     pub hall_requests: [HallRequest; NUMBER_OF_FLOORS],
+    pub iteration: i32,
 }
 
 impl fmt::Display for AllElevatorStates {
@@ -123,6 +124,7 @@ impl AllElevatorStates {
                 up: HallRequestState::Inactive,
                 down: HallRequestState::Inactive,
             }),
+            iteration: 0,
         }
     }
 
@@ -190,11 +192,11 @@ impl AllElevatorStates {
 
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
 pub fn start_master_server() {
-    let master: Host<AllElevatorStates> = Host::new_tcp_host(None);
-    info!("Master lytter på port {}", master.port());
+    let host: Host<AllElevatorStates> = Host::new_tcp_host(None);
+    info!("Master lytter på port {}", host.port());
 
     // Start å informere slaver om at master eksisterer
-    let advertiser = Advertiser::init(master.port());
+    let advertiser = Advertiser::init(host.port());
     advertiser.start_advertising();
 
     let mut master_elevator_states = AllElevatorStates::new();
@@ -202,7 +204,7 @@ pub fn start_master_server() {
 
     loop {
         select! {
-            recv(master.receive_channel()) -> message => {
+            recv(host.receive_channel()) -> message => {
                 let (address, recieved_elevator_states) = message.unwrap();
                 slave_addresses.insert(address);
 
@@ -213,30 +215,42 @@ pub fn start_master_server() {
                     master_elevator_states.elevators.insert(elevator_state.name.clone(), elevator_state.clone());
                 }
 
-                // Ta imot nye og slett fullførte bestillinger
-                for (floor, received_request) in recieved_elevator_states.hall_requests.iter().enumerate() {
-                    let master_request = master_elevator_states.hall_requests[floor].clone();
+                if recieved_elevator_states.iteration - master_elevator_states.iteration == 1 {
+                     // Ta imot nye og slett fullførte bestillinger
+                    for (floor, received_request) in recieved_elevator_states.hall_requests.iter().enumerate() {
+                        let master_request = master_elevator_states.hall_requests[floor].clone();
 
-                    match (&received_request.up, &master_request.up) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_request(floor as u8, Direction::Up),
-                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_elevator_states.hall_requests[floor].up = HallRequestState::Inactive,
-                        _ => {},
-                    }
+                        match (&received_request.up, &master_request.up) {
+                            (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_request(floor as u8, Direction::Up),
+                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_elevator_states.hall_requests[floor].up = HallRequestState::Inactive,
+                            _ => {},
+                        }
 
-                    match (&received_request.down, &master_request.down) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_request(floor as u8, Direction::Down),
-                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_elevator_states.hall_requests[floor].down = HallRequestState::Inactive,
-                        _ => {},
+                        match (&received_request.down, &master_request.down) {
+                            (HallRequestState::Requested, HallRequestState::Inactive) => master_elevator_states.assign_request(floor as u8, Direction::Down),
+                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_elevator_states.hall_requests[floor].down = HallRequestState::Inactive,
+                            _ => {},
+                        }
                     }
+                } else {
+                    warn!("Mottok utdatert informasjon fra slave. Ignorerer!");
                 }
+
+                master_elevator_states.iteration += 1;
 
                 // Informere alle slaver om nye bestillinger
                 for slave_address in &slave_addresses {
-                    master.send_channel().send((*slave_address, master_elevator_states.to_owned())).unwrap();
+                    host.send_channel().send((*slave_address, master_elevator_states.to_owned())).unwrap();
                 }
             }
         }
     }
+}
+
+pub fn send_state_to_maser(client: &Client<AllElevatorStates>, name: String, mut all_elevator_states: AllElevatorStates, local_elevator_state: SingleElevatorState) {
+    all_elevator_states.elevators.insert(name, local_elevator_state);
+    all_elevator_states.iteration += 1;
+    client.sender().send(all_elevator_states).unwrap();
 }
 
 /// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
@@ -253,7 +267,7 @@ pub fn start_slave_client(
     let (master_address, master_port) = advertiser.receive_channel().recv().unwrap();
     info!("Fant en master: {master_address} {master_port}");
 
-    let slave: Client<AllElevatorStates> =
+    let client: Client<AllElevatorStates> =
         Client::new_tcp_client(master_address.ip().octets(), master_port).unwrap();
     info!("Koblet til master!");
 
@@ -298,8 +312,7 @@ pub fn start_slave_client(
                 }
 
                 // Informer master om den nye tilstanden
-                all_elevator_states.elevators.insert(name.clone(), local_elevator_state.clone());
-                slave.sender().send(all_elevator_states.clone()).unwrap();
+                send_state_to_maser(&client, name.clone(), all_elevator_states.clone(), local_elevator_state.clone());
             },
             recv(rx_channels.call_button_rx) -> call_button => {
                 let call_button = call_button.unwrap();
@@ -316,23 +329,19 @@ pub fn start_slave_client(
                 }
 
                 // Informer master om den nye tilstanden
-                all_elevator_states.elevators.insert(name.clone(), local_elevator_state.clone());
-                slave.sender().send(all_elevator_states.clone()).unwrap();
+                send_state_to_maser(&client, name.clone(), all_elevator_states.clone(), local_elevator_state.clone());
             },
-            recv(slave.receiver()) -> message => {
+            recv(client.receiver()) -> message => {
                 let (_, master_state) = message.unwrap();
 
                 all_elevator_states = master_state;
                 all_elevator_states.elevators.insert(name.clone(), local_elevator_state.clone());
 
-                let requests = all_elevator_states.get_requests_for_elevator(&name).unwrap();
-                sync_call_lights(&elevio_elevator, &requests);
-
-
                 info!("Received state from master:\n{all_elevator_states}");
 
-                // Send den nye bestillingslista til heiskontrolleren
+                // Send den nye bestillingslista til heiskontrolleren og lyskontrolleren
                 if let Some(requests) = all_elevator_states.get_requests_for_elevator(&name) {
+                    sync_call_lights(&elevio_elevator, &requests);
                     elevator_command_tx.send(requests).unwrap();
                 }
             },

@@ -1,11 +1,3 @@
-mod elevator_controller;
-mod hall_request_assigner;
-mod inputs;
-mod light_sync;
-mod network;
-mod request_dispatch;
-mod timer;
-
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
 use elevator_controller::controller_loop;
@@ -14,10 +6,27 @@ use log::{error, info, LevelFilter};
 use request_dispatch::{start_master_server, start_slave_client};
 use std::{env, process::exit, thread::spawn};
 
+mod elevator_controller;
+mod hall_request_assigner;
+mod inputs;
+mod light_sync;
+mod network;
+mod request_dispatch;
+mod timer;
+
 fn main() {
     env_logger::Builder::new()
         .filter_level(LevelFilter::Trace)
         .init();
+
+        use std::env;
+
+    let port: u16 = env::args()
+        .nth(1)
+        .and_then(|arg| arg.parse().ok())
+        .unwrap_or(15657);
+        
+    info!("Bruker port: {port}");
 
     if env::args().any(|arg| arg == "master") {
         start_master_server();
@@ -26,7 +35,7 @@ fn main() {
 
     if env::args().any(|arg| arg == "slave") {
         let elevio_driver: elevio::elev::Elevator =
-            elevio::elev::Elevator::init("localhost:15657", 4).unwrap();
+            elevio::elev::Elevator::init(&format!("localhost:{}", port), 4).unwrap();
 
         let (command_channel_tx, command_channel_rx) = cbc::unbounded();
         let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();

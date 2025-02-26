@@ -11,11 +11,6 @@ use crate::request_dispatch::AllElevatorStates;
 
 
 pub fn load_state_from_file(file_path: &str) -> Result<AllElevatorStates, std::io::Error> {
-    if !std::path::Path::new(file_path).exists() {
-        info!("Backup-fil ikke funnet, starter med ny tilstand.");
-        return Ok(AllElevatorStates::new());
-    }
-
     let mut file = File::open(file_path)?;
     let mut json_string = String::new();
     file.read_to_string(&mut json_string)?;

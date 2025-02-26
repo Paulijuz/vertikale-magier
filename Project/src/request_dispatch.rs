@@ -249,6 +249,8 @@ pub fn start_master_server() {
                     }
                 }
 
+                master_elevator_states.iteration += 1;
+
                 // Informere alle slaver om nye bestillinger
                 for slave_address in &slave_addresses {
                     host.send_channel().send((*slave_address, master_elevator_states.to_owned())).unwrap();

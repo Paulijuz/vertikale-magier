@@ -279,6 +279,7 @@ pub fn send_state_to_maser(
 
 /// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
 pub fn start_slave_client(
+    name: Option<String>,
     elevio_elevator: &elevio::elev::Elevator,
     elevator_command_tx: cbc::Sender<Requests>,
     elevator_event_rx: cbc::Receiver<ElevatorEvent>,
@@ -295,8 +296,8 @@ pub fn start_slave_client(
         Client::new_tcp_client(master_address.ip().octets(), master_port).unwrap();
     info!("Koblet til master!");
 
-    // Bruk et tilfeldig dyr som id :)
-    let name = petname::petname(1, "").unwrap();
+    // Bruk et tilfeldig dyr som id dersom navn ikke er spesifisert:)
+    let name = name.unwrap_or(petname::petname(1, "").unwrap());
 
     let mut local_elevator_state = SingleElevatorState {
         name: name.clone(),

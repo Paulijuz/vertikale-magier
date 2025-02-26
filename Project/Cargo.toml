@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clap = "4.5.31"
 crossbeam-channel = "0.5.14"
 driver-rust = { git = "https://github.com/TTK4145/driver-rust", tag = "v0.1.0" }
 env_logger = "0.11.6"

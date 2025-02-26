@@ -5,6 +5,7 @@ use env_logger;
 use log::{error, info, LevelFilter};
 use request_dispatch::{start_master_server, start_slave_client};
 use std::{env, process::exit, thread::spawn};
+use clap::Parser;
 
 mod elevator_controller;
 mod hall_request_assigner;
@@ -15,25 +16,41 @@ mod request_dispatch;
 mod timer;
 mod backup;
 
-fn main() {
+#[derive(Debug, Parser)]
+struct Args {
+    #[arg(long, short)]
+    name: Option<String>,
 
+    #[arg(long, short, default_value_t = 15657)]
+    port: u16,
+
+    #[arg(long, short, default_value_t = false)]
+    master: bool,
+
+    #[arg(long, short, default_value_t = false)]
+    slave: bool,
+}
+
+fn main() {
     env_logger::Builder::new()
         .filter_level(LevelFilter::Trace)
         .init();
 
+    let args = Args::parse();
+
     let port: u16 = env::args()
         .nth(1)
-        .and_then(|arg| arg.parse().ok())
+        .and_then(|arg: String| arg.parse().ok())
         .unwrap_or(15657);
 
     info!("Bruker port: {port}");
 
-    if env::args().any(|arg| arg == "master") {
+    if args.master {
         start_master_server();
         return;
     }
 
-    if env::args().any(|arg| arg == "slave") {
+    if args.slave{
         let elevio_driver: elevio::elev::Elevator =
             elevio::elev::Elevator::init("localhost:15657", 4).unwrap();
 
@@ -45,7 +62,7 @@ fn main() {
             spawn(move || controller_loop(&elevio_driver, command_channel_rx, elevator_event_tx));
         }
 
-        start_slave_client(&elevio_driver, command_channel_tx, elevator_event_rx);
+        start_slave_client(None, &elevio_driver, command_channel_tx, elevator_event_rx);
         return;
     }
     

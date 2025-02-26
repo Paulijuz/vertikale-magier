@@ -38,12 +38,7 @@ fn main() {
 
     let args = Args::parse();
 
-    let port: u16 = env::args()
-        .nth(1)
-        .and_then(|arg: String| arg.parse().ok())
-        .unwrap_or(15657);
-
-    info!("Bruker port: {port}");
+    info!("Bruker port: {}", args.port);
 
     if args.master {
         start_master_server();
@@ -52,7 +47,7 @@ fn main() {
 
     if args.slave{
         let elevio_driver: elevio::elev::Elevator =
-            elevio::elev::Elevator::init("localhost:15657", 4).unwrap();
+            elevio::elev::Elevator::init(&format!("localhost:{}", args.port), 4).unwrap();
 
         let (command_channel_tx, command_channel_rx) = cbc::unbounded();
         let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();

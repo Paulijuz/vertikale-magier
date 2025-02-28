@@ -1,8 +1,8 @@
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use std::{
     collections::HashMap,
-    time::{Duration, Instant},
     thread::{spawn, JoinHandle},
+    time::{Duration, Instant},
 };
 
 // Check interval
@@ -15,14 +15,14 @@ const ELEVATOR_ID_LENGTH: usize = 16;
 // Struct for heartbeat message
 #[derive(Debug, Clone)]
 struct Heartbeat {
-    elevator_id: [u8; ELEVATOR_ID_LENGTH], 
+    elevator_id: [u8; ELEVATOR_ID_LENGTH],
     timestamp: Instant, // Timestamp of the heartbeat message
 }
 
 // Struct to monitor status
 pub struct ElevatorMonitor {
     heartbeat_tx: Sender<Heartbeat>, // Channel to send heartbeat messages
-    thread: Option<JoinHandle<()>>, // Handle for the monitoring thread
+    thread: Option<JoinHandle<()>>,  // Handle for the monitoring thread
 }
 
 impl ElevatorMonitor {
@@ -32,9 +32,7 @@ impl ElevatorMonitor {
         let (heartbeat_tx, heartbeat_rx) = unbounded::<Heartbeat>();
 
         // Spawn a thread to run the elevator monitor
-        let thread = Some(spawn(move || {
-            run_elevator_monitor(heartbeat_rx)
-        }));
+        let thread = Some(spawn(move || run_elevator_monitor(heartbeat_rx)));
 
         ElevatorMonitor {
             heartbeat_tx,
@@ -44,10 +42,12 @@ impl ElevatorMonitor {
 
     // Sends a heartbeat message for the given elevator ID
     pub fn send_heartbeat(&self, elevator_id: [u8; ELEVATOR_ID_LENGTH]) {
-        self.heartbeat_tx.send(Heartbeat {
-            elevator_id,
-            timestamp: Instant::now(),
-        }).unwrap();
+        self.heartbeat_tx
+            .send(Heartbeat {
+                elevator_id,
+                timestamp: Instant::now(),
+            })
+            .unwrap();
     }
 }
 

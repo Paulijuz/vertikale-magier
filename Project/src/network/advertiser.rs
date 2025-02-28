@@ -1,6 +1,6 @@
 use super::socket::{Client, SendableType};
-use crate::timer::Timer;
 use crate::network::elevator_monitor::ElevatorMonitor;
+use crate::timer::Timer;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -106,7 +106,6 @@ fn run_advertiser<T: SendableType + Clone>(
     let mut is_advertising = false;
 
     let elevator_monitor = ElevatorMonitor::new();
-
 
     loop {
         select! {

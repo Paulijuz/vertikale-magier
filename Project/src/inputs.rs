@@ -1,7 +1,6 @@
 use crossbeam_channel as cbc;
 use std::thread::spawn;
 use std::time::Duration;
-
 use driver_rust::elevio;
 
 pub struct RxChannels {

@@ -1,20 +1,22 @@
+use clap::Parser;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
 use elevator_controller::controller_loop;
 use env_logger;
 use log::{error, info, LevelFilter};
 use request_dispatch::{start_master_server, start_slave_client};
-use std::{env, process::exit, thread::spawn};
-use clap::Parser;
+use std::{process::exit, thread::spawn};
 
+mod backup;
+mod config;
 mod elevator_controller;
 mod hall_request_assigner;
 mod inputs;
 mod light_sync;
 mod network;
 mod request_dispatch;
+mod system_state;
 mod timer;
-mod backup;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -45,7 +47,7 @@ fn main() {
         return;
     }
 
-    if args.slave{
+    if args.slave {
         let elevio_driver: elevio::elev::Elevator =
             elevio::elev::Elevator::init(&format!("localhost:{}", args.port), 4).unwrap();
 
@@ -60,7 +62,7 @@ fn main() {
         start_slave_client(None, &elevio_driver, command_channel_tx, elevator_event_rx);
         return;
     }
-    
+
     error!("Programmet må startes som enten master eller slave. Kjør 'cargo run master' for master eller 'cargo run slave' for slave.");
     exit(1);
 }

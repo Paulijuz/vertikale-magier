@@ -1,6 +1,7 @@
-use crate::elevator_controller::NUMBER_OF_FLOORS;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
+
+use crate::config::NUMBER_OF_FLOORS;
 
 #[derive(Serialize, Deserialize)]
 pub enum Behaviour {

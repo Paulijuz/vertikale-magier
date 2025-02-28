@@ -1,13 +1,11 @@
-use crate::inputs;
-use crate::timer::Timer;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
 use log::debug;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
-const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
-pub const NUMBER_OF_FLOORS: usize = 4;
+use crate::config::DOOR_OPEN_DURATION;
+use crate::timer::Timer;
+use crate::{config::NUMBER_OF_FLOORS, inputs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum State {
@@ -24,7 +22,7 @@ pub enum Direction {
     Stopped,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Request {
     pub hall_up: bool,
     pub hall_down: bool,

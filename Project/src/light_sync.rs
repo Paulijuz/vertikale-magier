@@ -1,5 +1,6 @@
-use crate::elevator_controller::Requests;
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
+
+use crate::elevator_controller::Requests;
 
 pub fn sync_call_lights(elevator: &Elevator, requests: &Requests) {
     for (floor, request) in requests.iter().enumerate() {

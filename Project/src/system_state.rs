@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt};
 
-use crate::config::NUMBER_OF_FLOORS;
-use crate::elevator_controller::{Direction, Request, Requests, State};
-use crate::hall_request_assigner as hra;
+use crate::{
+    elevator::controller::State,
+    requests::{
+        assigner,
+        requests::{Direction, Request, Requests, NUMBER_OF_FLOORS},
+    },
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ElevatorState {
@@ -13,19 +17,19 @@ pub struct ElevatorState {
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
 }
 
-impl From<&ElevatorState> for hra::State {
+impl From<&ElevatorState> for assigner::State {
     fn from(single_elevator_state: &ElevatorState) -> Self {
-        hra::State {
+        assigner::State {
             behaviour: match single_elevator_state.state {
-                State::DoorOpen => hra::Behaviour::DoorOpen,
-                State::Moving => hra::Behaviour::Moving,
-                _ => hra::Behaviour::Idle,
+                State::DoorOpen => assigner::Behaviour::DoorOpen,
+                State::Moving => assigner::Behaviour::Moving,
+                _ => assigner::Behaviour::Idle,
             },
             floor: single_elevator_state.floor,
             direction: match single_elevator_state.direction {
-                Direction::Down => hra::Direction::Down,
-                Direction::Stopped => hra::Direction::Stop,
-                Direction::Up => hra::Direction::Up,
+                Direction::Down => assigner::Direction::Down,
+                Direction::Stopped => assigner::Direction::Stop,
+                Direction::Up => assigner::Direction::Up,
             },
             cab_requests: single_elevator_state.cab_requests,
         }
@@ -64,7 +68,7 @@ pub struct HallRequest {
     pub down: HallRequestState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SystemState {
     pub name: String,
     pub elevators: HashMap<String, ElevatorState>, //Liste over alle aktive heiser
@@ -99,6 +103,12 @@ impl fmt::Display for SystemState {
 }
 
 impl SystemState {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            ..Default::default()
+        }
+    }
     // Velger beste heis for en bestilling
     pub fn assign_request(&mut self, floor: u8, direction: Direction) {
         match direction {
@@ -121,7 +131,7 @@ impl SystemState {
             .map(|(k, v)| (k.to_owned(), v.into()))
             .collect();
 
-        let assignments = hra::run_hall_request_assigner(hra::HallRequestsStates {
+        let assignments = assigner::run_hall_request_assigner(assigner::HallRequestsStates {
             hall_requests,
             states,
         })
@@ -159,9 +169,17 @@ impl SystemState {
         return Some(requests);
     }
     pub fn requests_for_local_elevator(&self) -> Requests {
-        self.requests_for_elevator(&self.name).unwrap_or(Default::default())
+        self.requests_for_elevator(&self.name)
+            .unwrap_or(Default::default())
     }
     pub fn set_local_elevator_state(&mut self, local_elevator_state: &ElevatorState) {
-        self.elevators.insert(self.name.clone(), local_elevator_state.clone());
+        self.elevators
+            .insert(self.name.clone(), local_elevator_state.clone());
+    }
+    pub fn sync_with_master(&mut self, master_state: SystemState) {
+        *self = Self {
+            name: self.name.clone(),
+            ..master_state
+        };
     }
 }

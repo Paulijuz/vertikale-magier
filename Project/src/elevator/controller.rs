@@ -1,11 +1,20 @@
+use std::time::Duration;
+
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
-use log::debug;
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 
-use crate::config::DOOR_OPEN_DURATION;
-use crate::timer::Timer;
-use crate::{config::NUMBER_OF_FLOORS, inputs};
+use crate::{
+    requests::requests::{
+        requests_above_floor, requests_at_floor, requests_below_floor, Direction, Requests,
+    },
+    timer::Timer,
+};
+
+use super::inputs;
+
+const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum State {
@@ -14,22 +23,6 @@ pub enum State {
     DoorOpen,
     OutOfOrder,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Direction {
-    Up,
-    Down,
-    Stopped,
-}
-
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct Request {
-    pub hall_up: bool,
-    pub hall_down: bool,
-    pub cab: bool,
-}
-
-pub type Requests = [Request; NUMBER_OF_FLOORS];
 
 pub struct ElevatorEvent {
     pub direction: Direction,
@@ -57,78 +50,48 @@ impl<'e> ElevatorController<'e> {
             direction: Direction::Stopped,
             obstruction: true, // Assume worst until we hear otherwise from driver
             last_floor: Some(0),
-            requests: [Request {
-                cab: false,
-                hall_up: false,
-                hall_down: false,
-            }; NUMBER_OF_FLOORS],
+            requests: Default::default(),
         }
     }
-    fn requests_below(&self) -> bool {
-        let Some(floor) = self.last_floor else {
-            return false;
-        };
 
-        self.requests[..floor as usize]
-            .iter()
-            .any(|request| request.cab || request.hall_down || request.hall_up)
-    }
-    fn requests_above(&self) -> bool {
-        let Some(floor) = self.last_floor else {
-            return false;
-        };
-
-        self.requests[floor as usize + 1..]
-            .iter()
-            .any(|request| request.cab || request.hall_down || request.hall_up)
-    }
-    fn requests_here(&self, direction: Option<Direction>) -> bool {
-        let Some(floor) = self.last_floor else {
-            return false;
-        };
-
-        let request = self.requests[floor as usize];
-
-        match direction {
-            Some(Direction::Up) => request.cab || request.hall_up,
-            Some(Direction::Down) => request.cab || request.hall_down,
-            _ => request.cab || request.hall_up || request.hall_down,
-        }
-    }
     fn next_direction(&self) -> (Direction, State) {
+        let floor = self
+            .last_floor
+            .expect("Called next direction without known floor.") as usize;
+
         match self.direction {
             Direction::Up => {
-                return if self.requests_above() {
+                return if requests_above_floor(&self.requests, floor) {
                     (Direction::Up, State::Moving)
-                } else if self.requests_here(Some(Direction::Up)) {
+                } else if requests_at_floor(&self.requests, floor, Some(Direction::Up)) {
                     (Direction::Up, State::DoorOpen)
-                } else if self.requests_here(None) {
+                } else if requests_at_floor(&self.requests, floor, None) {
                     (Direction::Down, State::DoorOpen)
-                } else if self.requests_below() {
+                } else if requests_below_floor(&self.requests, floor) {
                     (Direction::Down, State::Moving)
                 } else {
                     (Direction::Stopped, State::Idle)
                 }
             }
             Direction::Down => {
-                return if self.requests_below() {
+                return if requests_below_floor(&self.requests, floor) {
                     (Direction::Down, State::Moving)
-                } else if self.requests_here(Some(Direction::Down)) {
+                } else if requests_at_floor(&self.requests, floor, Some(Direction::Down)) {
                     (Direction::Down, State::DoorOpen)
-                } else if self.requests_here(None) {
+                } else if requests_at_floor(&self.requests, floor, None) {
                     (Direction::Up, State::DoorOpen)
-                } else if self.requests_above() {
+                } else if requests_above_floor(&self.requests, floor) {
                     (Direction::Up, State::Moving)
                 } else {
                     (Direction::Stopped, State::Idle)
                 }
             }
             Direction::Stopped => {
-                return if self.requests_here(None) {
+                return if requests_at_floor(&self.requests, floor, None) {
                     (Direction::Stopped, State::DoorOpen)
-                } else if self.requests_above() {
+                } else if requests_above_floor(&self.requests, floor) {
                     (Direction::Up, State::Moving)
-                } else if self.requests_below() {
+                } else if requests_below_floor(&self.requests, floor) {
                     (Direction::Down, State::Moving)
                 } else {
                     (Direction::Stopped, State::Idle)
@@ -137,23 +100,22 @@ impl<'e> ElevatorController<'e> {
         }
     }
     fn should_stop(&self) -> bool {
-        let Some(floor) = self.last_floor else {
-            return false;
-        };
-        let floor = floor as usize;
+        let floor = self
+            .last_floor
+            .expect("Called next direction without known floor.") as usize;
 
         match self.direction {
             Direction::Down => {
                 return self.requests[floor].hall_down
                     || self.requests[floor].cab
-                    || !self.requests_below()
+                    || !requests_below_floor(&self.requests, floor)
             }
             Direction::Up => {
                 return self.requests[floor].hall_up
                     || self.requests[floor].cab
-                    || !self.requests_above()
+                    || !requests_above_floor(&self.requests, floor)
             }
-            _ => return true,
+            Direction::Stopped => return true,
         }
     }
     fn transision_to_moving(&mut self) {
@@ -193,7 +155,7 @@ pub fn controller_loop(
     command_channel_rx: cbc::Receiver<Requests>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
-    let rx_channels = inputs::get_input_channels(&elevio_elevator);
+    let input_channels = inputs::InputChannels::new(&elevio_elevator);
     let mut controller = ElevatorController::new(&elevio_elevator);
 
     loop {
@@ -203,7 +165,7 @@ pub fn controller_loop(
                 debug!("Recieved new requests: {:?}", requests);
 
                 controller.requests = requests;
-
+                debug!("{:?}", controller.fsm_state);
                 if controller.fsm_state != State::Idle {
                     continue;
                 }
@@ -223,9 +185,11 @@ pub fn controller_loop(
                         state: controller.fsm_state,
                         floor: controller.last_floor.unwrap(),
                     }).unwrap();
+                } else {
+                    warn!("Doin fuck al")
                 }
             },
-            recv(rx_channels.floor_sensor_rx) -> floor => {
+            recv(input_channels.floor_sensor_rx) -> floor => {
                 let floor = floor.unwrap();
                 debug!("Detekterte etasje: {floor}");
 
@@ -246,15 +210,18 @@ pub fn controller_loop(
                     floor: controller.last_floor.unwrap(),
                 }).unwrap();
             },
-            recv(rx_channels.stop_button_rx) -> stop_button => {
+            recv(input_channels.stop_button_rx) -> stop_button => {
                 let stop_button = stop_button.unwrap();
                 debug!("Detekterte stopknapp: {:}", stop_button);
 
-                elevio_elevator.motor_direction(elevio::elev::DIRN_STOP);
+                if !stop_button {
+                    continue;
+                } 
 
+                elevio_elevator.motor_direction(elevio::elev::DIRN_STOP);
                 controller.fsm_state = State::OutOfOrder;
             },
-            recv(rx_channels.obstruction_rx) -> obstruction_switch => {
+            recv(input_channels.obstruction_rx) -> obstruction_switch => {
                 controller.obstruction = obstruction_switch.unwrap();
                 debug!("Detekterte obstruksjon: {:}", controller.obstruction);
             },

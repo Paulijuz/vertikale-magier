@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
 
-use crate::config::NUMBER_OF_FLOORS;
+use super::requests::NUMBER_OF_FLOORS;
 
 #[derive(Serialize, Deserialize)]
 pub enum Behaviour {

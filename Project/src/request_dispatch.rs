@@ -7,11 +7,12 @@ use std::collections::HashSet;
 use std::net::SocketAddrV4;
 
 use crate::backup::{load_state_from_file, save_state_to_file};
-use crate::elevator_controller::{Direction, ElevatorEvent, Requests, State};
-use crate::inputs;
-use crate::light_sync::sync_call_lights;
+use crate::elevator::controller::{ElevatorEvent, State};
+use crate::elevator::inputs;
+use crate::elevator::lights::set_call_lights;
 use crate::network::advertiser::Advertiser;
 use crate::network::socket::{Client, Host};
+use crate::requests::requests::{Direction, Request, Requests};
 use crate::system_state::{ElevatorState, HallRequestState, SystemState};
 
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
@@ -24,7 +25,7 @@ pub fn start_master_server() {
         }
         Err(_) => {
             info!("No backup found.");
-            Default::default()
+            SystemState::new(String::from("Master"))
         }
     };
 
@@ -43,7 +44,7 @@ pub fn start_master_server() {
                 let (address, recieved_elevator_states) = message.unwrap();
                 slave_addresses.insert(address);
 
-                info!("Master mottok melding fra slave:\n{}", recieved_elevator_states);
+                info!("Master mottok melding fra \"{}\":\n{}", &recieved_elevator_states.name, recieved_elevator_states);
 
                 // Legg til nye heiser
                 for elevator_state in recieved_elevator_states.elevators.values() {
@@ -90,9 +91,7 @@ pub fn send_state_to_maser(
     mut system_state: SystemState,
     local_elevator_state: ElevatorState,
 ) {
-    system_state
-        .elevators
-        .insert(name, local_elevator_state);
+    system_state.elevators.insert(name, local_elevator_state);
     system_state.iteration += 1;
     client.sender().send(system_state).unwrap();
 }
@@ -104,7 +103,7 @@ pub fn start_slave_client(
     elevator_command_tx: cbc::Sender<Requests>,
     elevator_event_rx: cbc::Receiver<ElevatorEvent>,
 ) {
-    let rx_channels = inputs::get_input_channels(&elevio_elevator);
+    let input_channels = inputs::InputChannels::new(elevio_elevator);
 
     let advertiser = Advertiser::init(0u16);
 
@@ -160,7 +159,7 @@ pub fn start_slave_client(
                 // Informer master om den nye tilstanden
                 send_state_to_maser(&client, name.clone(), system_state.clone(), local_elevator_state.clone());
             },
-            recv(rx_channels.call_button_rx) -> call_button => {
+            recv(input_channels.call_button_rx) -> call_button => {
                 let call_button = call_button.unwrap();
 
                 let floor = call_button.floor as usize;
@@ -183,14 +182,14 @@ pub fn start_slave_client(
             recv(client.receiver()) -> message => {
                 let (_, master_state) = message.unwrap();
 
-                system_state = master_state;
+                system_state.sync_with_master(master_state);
                 system_state.set_local_elevator_state(&local_elevator_state);
 
                 info!("Received state from master:\n{system_state}");
 
                 // Send den nye bestillingslista til heiskontrolleren og lyskontrolleren
                 if let Some(requests) = system_state.requests_for_elevator(&name) {
-                    sync_call_lights(&elevio_elevator, &requests);
+                    set_call_lights(&elevio_elevator, &requests);
                     elevator_command_tx.send(requests).unwrap();
                 }
 

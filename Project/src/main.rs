@@ -1,7 +1,7 @@
 use clap::Parser;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
-use elevator_controller::controller_loop;
+use elevator::controller::controller_loop;
 use env_logger;
 use log::{error, info, LevelFilter};
 use request_dispatch::{start_master_server, start_slave_client};
@@ -9,12 +9,10 @@ use std::{process::exit, thread::spawn};
 
 mod backup;
 mod config;
-mod elevator_controller;
-mod hall_request_assigner;
-mod inputs;
-mod light_sync;
+mod elevator;
 mod network;
 mod request_dispatch;
+mod requests;
 mod system_state;
 mod timer;
 
@@ -63,6 +61,6 @@ fn main() {
         return;
     }
 
-    error!("Programmet må startes som enten master eller slave. Kjør 'cargo run master' for master eller 'cargo run slave' for slave.");
+    error!("Programmet må startes som enten master eller slave. Kjør 'cargo run -- --master' for master eller 'cargo run -- --slave' for slave.");
     exit(1);
 }

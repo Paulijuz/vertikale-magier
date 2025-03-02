@@ -1,8 +1,8 @@
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 
-use crate::elevator_controller::Requests;
+use crate::requests::requests::Requests;
 
-pub fn sync_call_lights(elevator: &Elevator, requests: &Requests) {
+pub fn set_call_lights(elevator: &Elevator, requests: &Requests) {
     for (floor, request) in requests.iter().enumerate() {
         let floor = floor as u8;
 

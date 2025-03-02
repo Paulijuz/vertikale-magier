@@ -172,7 +172,7 @@ impl SystemState {
         self.requests_for_elevator(&self.name)
             .unwrap_or(Default::default())
     }
-    pub fn set_local_elevator_state(&mut self, local_elevator_state: &ElevatorState) {
+    pub fn set_local_elevator_state(&mut self, local_elevator_state: ElevatorState) {
         self.elevators
             .insert(self.name.clone(), local_elevator_state.clone());
     }

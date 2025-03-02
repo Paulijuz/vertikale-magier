@@ -11,8 +11,9 @@ use crate::elevator::controller::{ElevatorEvent, State};
 use crate::elevator::inputs;
 use crate::elevator::lights::set_call_lights;
 use crate::network::advertiser::Advertiser;
-use crate::network::socket::{Client, Host};
-use crate::requests::requests::{Direction, Request, Requests};
+use crate::network::client::Client;
+use crate::network::host::Host;
+use crate::requests::requests::{Direction, Requests};
 use crate::system_state::{ElevatorState, HallRequestState, SystemState};
 
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
@@ -29,7 +30,7 @@ pub fn start_master_server() {
         }
     };
 
-    let host: Host<SystemState> = Host::new_tcp_host(None);
+    let host = Host::<SystemState>::new_tcp_host(None);
     info!("Master lytter på port: {}", host.port());
 
     // Start å informere slaver om at master eksisterer
@@ -87,13 +88,12 @@ pub fn start_master_server() {
 
 pub fn send_state_to_maser(
     client: &Client<SystemState>,
-    name: String,
     mut system_state: SystemState,
     local_elevator_state: ElevatorState,
 ) {
-    system_state.elevators.insert(name, local_elevator_state);
+    system_state.set_local_elevator_state(local_elevator_state);
     system_state.iteration += 1;
-    client.sender().send(system_state).unwrap();
+    client.send_channel().send(system_state).unwrap();
 }
 
 /// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
@@ -125,10 +125,7 @@ pub fn start_slave_client(
         floor: 0,
     };
 
-    let mut system_state = SystemState {
-        name: name.clone(),
-        ..Default::default()
-    };
+    let mut system_state = SystemState::new(name);
 
     loop {
         cbc::select! {
@@ -153,11 +150,11 @@ pub fn start_slave_client(
                 }
 
                 // Send den oppdaterte ordrelisten til heiskontrolleren
-                if let Some(requests) = system_state.requests_for_elevator(&name) {
-                    elevator_command_tx.send(requests).unwrap();
-                }
+                let requests = system_state.requests_for_local_elevator();
+                elevator_command_tx.send(requests).unwrap();
+
                 // Informer master om den nye tilstanden
-                send_state_to_maser(&client, name.clone(), system_state.clone(), local_elevator_state.clone());
+                send_state_to_maser(&client, system_state.clone(), local_elevator_state.clone());
             },
             recv(input_channels.call_button_rx) -> call_button => {
                 let call_button = call_button.unwrap();
@@ -167,31 +164,30 @@ pub fn start_slave_client(
 
                 // Legg inn bestilling på etasje
                 match call_button.call {
-                    HALL_UP if hall_request.up   == HallRequestState::Inactive => hall_request.up = HallRequestState::Requested,
+                    HALL_UP if hall_request.up == HallRequestState::Inactive => hall_request.up = HallRequestState::Requested,
                     HALL_DOWN if hall_request.down == HallRequestState::Inactive => hall_request.down = HallRequestState::Requested,
                     CAB => local_elevator_state.cab_requests[floor] = true,
                     _ => {},
                 }
 
                 // Informer master om den nye tilstanden
-                send_state_to_maser(&client, name.clone(), system_state.clone(), local_elevator_state.clone());
-                system_state.elevators.insert(name.clone(), local_elevator_state.clone());
-                client.sender().send(system_state.clone()).unwrap();
+                send_state_to_maser(&client, system_state.clone(), local_elevator_state.clone());
+                system_state.set_local_elevator_state(local_elevator_state.clone());
+                client.send_channel().send(system_state.clone()).unwrap();
 
             },
-            recv(client.receiver()) -> message => {
+            recv(client.receive_channel()) -> message => {
                 let (_, master_state) = message.unwrap();
 
                 system_state.sync_with_master(master_state);
-                system_state.set_local_elevator_state(&local_elevator_state);
+                system_state.set_local_elevator_state(local_elevator_state.clone());
 
                 info!("Received state from master:\n{system_state}");
 
                 // Send den nye bestillingslista til heiskontrolleren og lyskontrolleren
-                if let Some(requests) = system_state.requests_for_elevator(&name) {
-                    set_call_lights(&elevio_elevator, &requests);
-                    elevator_command_tx.send(requests).unwrap();
-                }
+                let requests = system_state.requests_for_local_elevator();
+                set_call_lights(&elevio_elevator, &requests);
+                elevator_command_tx.send(requests).unwrap();
 
             },
         }

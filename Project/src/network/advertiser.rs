@@ -1,4 +1,3 @@
-use super::socket::{Client, SendableType};
 use crate::network::elevator_monitor::ElevatorMonitor;
 use crate::timer::Timer;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
@@ -10,6 +9,8 @@ use std::{
     time::Duration,
     u8,
 };
+
+use super::client::{Client, SendableType};
 
 const ADVERTISING_INTERVAL: Duration = Duration::from_secs(1);
 // Use port 52052 and 239.0.0.52 for group 52 <3
@@ -134,10 +135,10 @@ fn run_advertiser<T: SendableType + Clone>(
                     continue;
                 }
 
-                client.sender().send(advertisment.clone()).unwrap();
+                client.send_channel().send(advertisment.clone()).unwrap();
                 timer.start();
             },
-            recv(client.receiver()) -> data => {
+            recv(client.receive_channel()) -> data => {
                 let (address, received_advertisment) = data.unwrap();
 
                 if received_advertisment.sender_id == advertisment.sender_id {

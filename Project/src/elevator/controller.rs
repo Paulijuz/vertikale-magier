@@ -216,7 +216,7 @@ pub fn controller_loop(
 
                 if !stop_button {
                     continue;
-                } 
+                }
 
                 elevio_elevator.motor_direction(elevio::elev::DIRN_STOP);
                 controller.fsm_state = State::OutOfOrder;

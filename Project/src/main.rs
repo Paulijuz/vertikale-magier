@@ -8,7 +8,6 @@ use request_dispatch::{start_master_server, start_slave_client};
 use std::{process::exit, thread::spawn};
 
 mod backup;
-mod config;
 mod elevator;
 mod network;
 mod request_dispatch;

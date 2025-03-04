@@ -47,7 +47,7 @@ pub fn start_master_server() {
 
     let mut slave_addresses: HashSet<SocketAddrV4> = HashSet::new();
 
-    let ticker = tick(Duration::from_millis(100));
+    let ticker = tick(Duration::from_millis(1000));
 
     loop {
         select! {
@@ -97,7 +97,6 @@ pub fn start_master_server() {
                 for slave_address in &slave_addresses {
                     host.send_channel().send((*slave_address, worldview.to_owned())).unwrap();
                 }
-                let mut _timestamp_start_master_server = SystemTime::now();
             },
             // Start å informere slaver om at master eksisterer
             recv(ticker) -> _message => {
@@ -126,6 +125,13 @@ pub fn start_master_server() {
     
                 if changed {
                     worldview.assign_requests();
+                    
+                    worldview.iteration += 1;
+
+                    // Informere alle slaver om nye bestillinger
+                    for slave_address in &slave_addresses {
+                        host.send_channel().send((*slave_address, worldview.to_owned())).unwrap();
+                    }
                 }
             }
         }

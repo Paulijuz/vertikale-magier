@@ -56,10 +56,13 @@ pub fn run_hall_request_assigner(
         .output()
         .expect("Failed to start hall_request_assigner");
 
-    let assignments = serde_json::from_slice(&output.stdout).unwrap();
-
     if output.status.success() {
-        Ok(assignments)
+        let assignments = serde_json::from_slice(&output.stdout);
+
+        match assignments {
+            Ok(assignments) => Ok(assignments),
+            Err(_) => Err(String::from("Invalid output from assigner.")),
+        }
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }

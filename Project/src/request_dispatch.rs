@@ -68,17 +68,19 @@ pub fn start_master_server() {
                         let master_request = worldview.hall_requests[floor].clone();
 
                         match (&received_request.up, &master_request.up) {
-                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.assign_request(floor as u8, Direction::Up),
+                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.add_request(floor as u8, Direction::Up),
                             (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.hall_requests[floor].up = HallRequestState::Inactive,
                             _ => {},
                         }
 
                         match (&received_request.down, &master_request.down) {
-                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.assign_request(floor as u8, Direction::Down),
+                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.add_request(floor as u8, Direction::Down),
                             (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.hall_requests[floor].down = HallRequestState::Inactive,
                             _ => {},
                         }
                     }
+
+                    worldview.assign_requests();
                 }
 
                 worldview.iteration += 1;
@@ -93,27 +95,20 @@ pub fn start_master_server() {
             recv(ticker) -> _message => {
                 // Hent nåværende tidspunkt
                 let timestamp_start_master_server = SystemTime::now();
+                let mut changed = false;
 
                 // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
-                for requests in worldview.hall_requests.clone() {
-                    if let Ok(duration) = timestamp_start_master_server.duration_since(requests.timestamp_assigned_request_up.unwrap()) {
-                        if duration > Duration::from_secs(5){
-                            if let HallRequestState::Assigned(name) = &requests.up {
-                                worldview.elevators.get_mut(name).unwrap().active = false;
-                                let this_elevator = &worldview.elevators[name];
-                                worldview.assign_request(this_elevator.floor, Direction::Up);
-                            }
+                for elevator in worldview.elevators.values_mut() {
+                    if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
+                        if duration > Duration::from_secs(5) {
+                            elevator.active = false;
+                            changed = true;
                         }
                     }
-                    if let Ok(duration) = timestamp_start_master_server.duration_since(requests.timestamp_assigned_request_down.unwrap()) {
-                        if duration > Duration::from_secs(5){
-                            if let HallRequestState::Assigned(name) = &requests.down {
-                                worldview.elevators.get_mut(name).unwrap().active = false;
-                                let this_elevator = &worldview.elevators[name];
-                                worldview.assign_request(this_elevator.floor, Direction::Down);
-                            }
-                        }
-                    }
+                }
+    
+                if changed {
+                    worldview.assign_requests();
                 }
             }
         }
@@ -127,8 +122,9 @@ pub fn start_master_server() {
 pub fn send_state_to_maser(
     client: &Client<Worldview>,
     mut system_state: Worldview,
-    local_elevator_state: ElevatorState,
+    mut local_elevator_state: ElevatorState,
 ) {
+    local_elevator_state.timestamp_last_event = SystemTime::now();
     system_state.set_local_elevator_state(local_elevator_state);
     system_state.iteration += 1;
     client.send_channel().send(system_state).unwrap();
@@ -162,6 +158,7 @@ pub fn start_slave_client(
         direction: Direction::Up,
         floor: 0,
         active: true,
+        timestamp_last_event: SystemTime::now(),
     };
 
     let mut worldview = Worldview::new(name);

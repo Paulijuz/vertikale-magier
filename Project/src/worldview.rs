@@ -1,3 +1,4 @@
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, time::SystemTime};
 
@@ -16,6 +17,7 @@ pub struct ElevatorState {
     pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
     pub active: bool,
+    pub timestamp_last_event: SystemTime,
 }
 
 impl From<&ElevatorState> for assigner::State {
@@ -84,8 +86,6 @@ impl Default for HallRequestState {
 pub struct HallRequest {
     pub up: HallRequestState,
     pub down: HallRequestState,
-    pub timestamp_assigned_request_up: Option<SystemTime>,
-    pub timestamp_assigned_request_down: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,25 +137,16 @@ impl Worldview {
             ..Default::default()
         }
     }
-    // Velger beste heis for en bestilling
-    pub fn assign_request(&mut self, floor: u8, direction: Direction) {
-        let timestamp_assigned_request_up = SystemTime::now();
-        let timestamp_assigned_request_down = SystemTime::now();
-
+    pub fn add_request(&mut self, floor: u8, direction: Direction) {
         match direction {
-            Direction::Up => {
-                self.hall_requests[floor as usize].up = HallRequestState::Requested;
-                self.hall_requests[floor as usize].timestamp_assigned_request_up =
-                    Some(timestamp_assigned_request_up);
-            }
-            Direction::Down => {
-                self.hall_requests[floor as usize].down = HallRequestState::Requested;
-                self.hall_requests[floor as usize].timestamp_assigned_request_down =
-                    Some(timestamp_assigned_request_down);
-            }
+            Direction::Up => self.hall_requests[floor as usize].up = HallRequestState::Requested,
+            Direction::Down => self.hall_requests[floor as usize].down = HallRequestState::Requested,
             _ => panic!("Tried to assign request with invalid direction"),
         }
+    }
 
+    // Velger beste heis for en bestilling
+    pub fn assign_requests(&mut self) {
         let hall_requests = self.hall_requests.clone().map(|request| {
             (
                 request.up != HallRequestState::Inactive,
@@ -169,11 +160,13 @@ impl Worldview {
             .map(|(k, v)| (k.to_owned(), v.into()))
             .collect();
 
-        let assignments = assigner::run_hall_request_assigner(assigner::HallRequestsStates {
+        let Ok(assignments) = assigner::run_hall_request_assigner(assigner::HallRequestsStates {
             hall_requests,
             states,
-        })
-        .unwrap();
+        }) else {
+            warn!("Could not assign requests.");
+            return;
+        };
 
         for (name, assigned_hall_requests) in assignments.iter() {
             for (floor, (up, down)) in assigned_hall_requests.iter().enumerate() {

@@ -1,9 +1,10 @@
-use crossbeam_channel as cbc;
+use crossbeam_channel::{self as cbc, tick};
 use crossbeam_channel::select;
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info};
 use std::collections::HashSet;
 use std::net::SocketAddrV4;
+use std::time::{Duration, SystemTime};
 
 use crate::backup::{load_state_from_file, save_state_to_file};
 use crate::elevator::{
@@ -21,7 +22,7 @@ const MASTER_ADVERTISMENT_PORT: u16 = 52052;
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
 pub fn start_master_server() {
     // Load state from backup if available
-    let mut master_system_state = match load_state_from_file("backup.json") {
+    let mut worldview = match load_state_from_file("backup.json") {
         Ok(states) => {
             info!("Loaded backup.");
             states
@@ -46,6 +47,8 @@ pub fn start_master_server() {
 
     let mut slave_addresses: HashSet<SocketAddrV4> = HashSet::new();
 
+    let ticker = tick(Duration::from_millis(100));
+
     loop {
         select! {
             recv(host.receive_channel()) -> message => {
@@ -56,38 +59,66 @@ pub fn start_master_server() {
 
                 // Legg til nye heiser
                 for elevator_state in recieved_elevator_states.elevators.values() {
-                    master_system_state.elevators.insert(recieved_elevator_states.name.clone(), elevator_state.clone());
+                    worldview.elevators.insert(recieved_elevator_states.name.clone(), elevator_state.clone());
                 }
 
-                if recieved_elevator_states.iteration - master_system_state.iteration == 1 {
+                if recieved_elevator_states.iteration - worldview.iteration == 1 {
                      // Ta imot nye og slett fullførte bestillinger
                     for (floor, received_request) in recieved_elevator_states.hall_requests.iter().enumerate() {
-                        let master_request = master_system_state.hall_requests[floor].clone();
+                        let master_request = worldview.hall_requests[floor].clone();
 
                         match (&received_request.up, &master_request.up) {
-                            (HallRequestState::Requested, HallRequestState::Inactive) => master_system_state.assign_request(floor as u8, Direction::Up),
-                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_system_state.hall_requests[floor].up = HallRequestState::Inactive,
+                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.assign_request(floor as u8, Direction::Up),
+                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.hall_requests[floor].up = HallRequestState::Inactive,
                             _ => {},
                         }
 
                         match (&received_request.down, &master_request.down) {
-                            (HallRequestState::Requested, HallRequestState::Inactive) => master_system_state.assign_request(floor as u8, Direction::Down),
-                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_system_state.hall_requests[floor].down = HallRequestState::Inactive,
+                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.assign_request(floor as u8, Direction::Down),
+                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.hall_requests[floor].down = HallRequestState::Inactive,
                             _ => {},
                         }
                     }
                 }
 
-                master_system_state.iteration += 1;
+                worldview.iteration += 1;
 
                 // Informere alle slaver om nye bestillinger
                 for slave_address in &slave_addresses {
-                    host.send_channel().send((*slave_address, master_system_state.to_owned())).unwrap();
+                    host.send_channel().send((*slave_address, worldview.to_owned())).unwrap();
+                }
+                let mut _timestamp_start_master_server = SystemTime::now();
+            },
+            // Start å informere slaver om at master eksisterer
+            recv(ticker) -> _message => {
+                // Hent nåværende tidspunkt
+                let timestamp_start_master_server = SystemTime::now();
+
+                // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
+                for requests in worldview.hall_requests.clone() {
+                    if let Ok(duration) = timestamp_start_master_server.duration_since(requests.timestamp_assigned_request_up.unwrap()) {
+                        if duration > Duration::from_secs(5){
+                            if let HallRequestState::Assigned(name) = &requests.up {
+                                worldview.elevators.get_mut(name).unwrap().active = false;
+                                let this_elevator = &worldview.elevators[name];
+                                worldview.assign_request(this_elevator.floor, Direction::Up);
+                            }
+                        }
+                    }
+                    if let Ok(duration) = timestamp_start_master_server.duration_since(requests.timestamp_assigned_request_down.unwrap()) {
+                        if duration > Duration::from_secs(5){
+                            if let HallRequestState::Assigned(name) = &requests.down {
+                                worldview.elevators.get_mut(name).unwrap().active = false;
+                                let this_elevator = &worldview.elevators[name];
+                                worldview.assign_request(this_elevator.floor, Direction::Down);
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        if let Err(e) = save_state_to_file(&master_system_state, "backup.json") {
+        if let Err(e) = save_state_to_file(&worldview, "backup.json") {
             error!("klarte ikke lagre backup: {e}");
         }
     }
@@ -130,9 +161,10 @@ pub fn start_slave_client(
         cab_requests: [false; 4],
         direction: Direction::Up,
         floor: 0,
+        active: true,
     };
 
-    let mut system_state = Worldview::new(name);
+    let mut worldview = Worldview::new(name);
 
     loop {
         cbc::select! {
@@ -149,25 +181,25 @@ pub fn start_slave_client(
 
                 if elevator_event.direction != Direction::Down {
                     debug!("Cleared up.");
-                    system_state.hall_requests[elevator_event.floor as usize].up = HallRequestState::Inactive;
+                    worldview.hall_requests[elevator_event.floor as usize].up = HallRequestState::Inactive;
                 }
                 if elevator_event.direction != Direction::Up {
                     debug!("Cleared down.");
-                    system_state.hall_requests[elevator_event.floor as usize].down = HallRequestState::Inactive;
+                    worldview.hall_requests[elevator_event.floor as usize].down = HallRequestState::Inactive;
                 }
 
                 // Send den oppdaterte ordrelisten til heiskontrolleren
-                let requests = system_state.requests_for_local_elevator();
+                let requests = worldview.requests_for_local_elevator();
                 elevator_command_tx.send(requests).unwrap();
 
                 // Informer master om den nye tilstanden
-                send_state_to_maser(&client, system_state.clone(), local_elevator_state.clone());
+                send_state_to_maser(&client, worldview.clone(), local_elevator_state.clone());
             },
             recv(input_channels.call_button_rx) -> call_button => {
                 let call_button = call_button.unwrap();
 
                 let floor = call_button.floor as usize;
-                let hall_request = &mut system_state.hall_requests[floor];
+                let hall_request = &mut worldview.hall_requests[floor];
 
                 // Legg inn bestilling på etasje
                 match call_button.call {
@@ -178,29 +210,31 @@ pub fn start_slave_client(
                 }
 
                 // Informer master om den nye tilstanden
-                send_state_to_maser(&client, system_state.clone(), local_elevator_state.clone());
-                system_state.set_local_elevator_state(local_elevator_state.clone());
-                client.send_channel().send(system_state.clone()).unwrap();
+                send_state_to_maser(&client, worldview.clone(), local_elevator_state.clone());
+                worldview.set_local_elevator_state(local_elevator_state.clone());
+                client.send_channel().send(worldview.clone()).unwrap();
 
             },
             recv(client.receive_channel()) -> message => {
                 let (_, master_state) = message.unwrap();
 
-                system_state.sync_with_master(master_state);
-                system_state.set_local_elevator_state(local_elevator_state.clone());
+                worldview.sync_with_master(master_state);
+                worldview.set_local_elevator_state(local_elevator_state.clone());
 
-                info!("Received state from master:\n{system_state}");
+                info!("Received state from master:\n{worldview}");
 
                 // Send den nye bestillingslista til heiskontrolleren og lyskontrolleren
-                let requests = system_state.requests_for_local_elevator();
+                let requests = worldview.requests_for_local_elevator();
                 set_call_lights(&elevio_elevator, &requests);
                 elevator_command_tx.send(requests).unwrap();
-
             },
         }
-
-        if let Err(e) = save_state_to_file(&system_state, "backup.json") {
-            error!("Klarte ikke å lagre backup: {e}");
+        if let Err(e) = save_state_to_file(&worldview, "backup.json") {
+            error!(
+                "Klarte ikke sende den nye bestillingslista til heiskontrolleren i back-up: {}",
+                e
+            );
+            info!("Sendt den nye bestillingslista til heiskontrolleren i back-up")
         }
     }
 }

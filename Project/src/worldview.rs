@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt};
+use std::{collections::HashMap, fmt, time::SystemTime};
 
 use crate::{
     elevator::controller::Behaviour,
@@ -15,6 +15,7 @@ pub struct ElevatorState {
     pub state: Behaviour,
     pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
+    pub active: bool,
 }
 
 impl From<&ElevatorState> for assigner::State {
@@ -83,6 +84,8 @@ impl Default for HallRequestState {
 pub struct HallRequest {
     pub up: HallRequestState,
     pub down: HallRequestState,
+    pub timestamp_assigned_request_up: Option<SystemTime>,
+    pub timestamp_assigned_request_down: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,10 +139,19 @@ impl Worldview {
     }
     // Velger beste heis for en bestilling
     pub fn assign_request(&mut self, floor: u8, direction: Direction) {
+        let timestamp_assigned_request_up = SystemTime::now();
+        let timestamp_assigned_request_down = SystemTime::now();
+
         match direction {
-            Direction::Up => self.hall_requests[floor as usize].up = HallRequestState::Requested,
+            Direction::Up => {
+                self.hall_requests[floor as usize].up = HallRequestState::Requested;
+                self.hall_requests[floor as usize].timestamp_assigned_request_up =
+                    Some(timestamp_assigned_request_up);
+            }
             Direction::Down => {
-                self.hall_requests[floor as usize].down = HallRequestState::Requested
+                self.hall_requests[floor as usize].down = HallRequestState::Requested;
+                self.hall_requests[floor as usize].timestamp_assigned_request_down =
+                    Some(timestamp_assigned_request_down);
             }
             _ => panic!("Tried to assign request with invalid direction"),
         }
@@ -153,6 +165,7 @@ impl Worldview {
         let states = self
             .elevators
             .iter()
+            .filter(|(_, v)| v.active)
             .map(|(k, v)| (k.to_owned(), v.into()))
             .collect();
 

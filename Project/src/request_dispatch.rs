@@ -1,18 +1,17 @@
 use crossbeam_channel as cbc;
 use crossbeam_channel::select;
-use driver_rust::elevio;
-use driver_rust::elevio::elev::{CAB, HALL_DOWN, HALL_UP};
+use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info};
 use std::collections::HashSet;
 use std::net::SocketAddrV4;
 
 use crate::backup::{load_state_from_file, save_state_to_file};
-use crate::elevator::controller::{ElevatorEvent, State};
-use crate::elevator::inputs;
-use crate::elevator::lights::set_call_lights;
-use crate::network::advertiser::Advertiser;
-use crate::network::client::Client;
-use crate::network::host::Host;
+use crate::elevator::{
+    controller::{ElevatorEvent, State},
+    inputs,
+    lights::set_call_lights,
+};
+use crate::network::{advertiser::Advertiser, Client, Host};
 use crate::requests::requests::{Direction, Requests};
 use crate::system_state::{ElevatorState, HallRequestState, SystemState};
 
@@ -34,7 +33,7 @@ pub fn start_master_server() {
     info!("Master lytter på port: {}", host.port());
 
     // Start å informere slaver om at master eksisterer
-    let advertiser = Advertiser::init(host.port());
+    let advertiser = Advertiser::new(host.port());
     advertiser.start_advertising();
 
     let mut slave_addresses: HashSet<SocketAddrV4> = HashSet::new();
@@ -99,13 +98,13 @@ pub fn send_state_to_maser(
 /// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
 pub fn start_slave_client(
     name: Option<String>,
-    elevio_elevator: &elevio::elev::Elevator,
+    elevio_elevator: &Elevator,
     elevator_command_tx: cbc::Sender<Requests>,
     elevator_event_rx: cbc::Receiver<ElevatorEvent>,
 ) {
     let input_channels = inputs::InputChannels::new(elevio_elevator);
 
-    let advertiser = Advertiser::init(0u16);
+    let advertiser = Advertiser::new(0u16);
 
     info!("Leter etter en master...");
     let (master_address, master_port) = advertiser.receive_channel().recv().unwrap();

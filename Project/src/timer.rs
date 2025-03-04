@@ -25,11 +25,7 @@ impl Timer {
     }
 
     pub fn start(&mut self) {
-        if self
-            .is_active
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-            .is_err()
-        {
+        if self.is_active.fetch_or(true, Ordering::Relaxed) {
             return;
         }
 

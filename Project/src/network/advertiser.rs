@@ -1,6 +1,5 @@
 use crate::network::elevator_monitor::ElevatorMonitor;
-use crate::timer::Timer;
-use crossbeam_channel::{select, unbounded, Receiver, Sender};
+use crossbeam_channel::{select, tick, unbounded, Receiver, Sender};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -38,7 +37,7 @@ pub struct Advertiser<T: SendableType + Clone> {
 }
 
 impl<T: SendableType + Clone> Advertiser<T> {
-    pub fn init(advertisment: T) -> Self {
+    pub fn new(advertisment: T) -> Self {
         let (control_channel_tx, control_channel_rx) = unbounded::<AdvertiserCommand<T>>();
         let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, T)>();
 
@@ -102,8 +101,9 @@ fn run_advertiser<T: SendableType + Clone>(
     };
 
     let client: Client<Advertisment<T>> =
-        Client::new_multicast_client(ADVERTISING_IP, ADVERTISING_PORT);
-    let mut timer = Timer::init(ADVERTISING_INTERVAL);
+        Client::new_udp_multicast_client(ADVERTISING_IP, ADVERTISING_PORT);
+    let ticker = tick(ADVERTISING_INTERVAL);
+
     let mut is_advertising = false;
 
     let elevator_monitor = ElevatorMonitor::new();
@@ -118,7 +118,6 @@ fn run_advertiser<T: SendableType + Clone>(
                         }
 
                         is_advertising = true;
-                        timer.start();
                     },
                     AdvertiserCommand::Stop => is_advertising = false,
                     AdvertiserCommand::SetAdvertisment(new_advertisment_data) => {
@@ -130,13 +129,12 @@ fn run_advertiser<T: SendableType + Clone>(
                     AdvertiserCommand::Exit => break,
                 }
             },
-            recv(timer.timeout_channel()) -> _ => {
+            recv(ticker) -> _ => {
                 if !is_advertising {
                     continue;
                 }
 
                 client.send_channel().send(advertisment.clone()).unwrap();
-                timer.start();
             },
             recv(client.receive_channel()) -> data => {
                 let (address, received_advertisment) = data.unwrap();

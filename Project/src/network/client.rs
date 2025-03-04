@@ -76,7 +76,7 @@ impl<T: SendableType> Client<T> {
             receiver_thread: Some(receive_thread_handle),
         }
     }
-    pub fn new_multicast_client(multicast_ip: [u8; 4], port: u16) -> Self {
+    pub fn new_udp_multicast_client(multicast_ip: [u8; 4], port: u16) -> Self {
         let multicast_ip = Ipv4Addr::from(multicast_ip);
         let address = SocketAddrV4::new(multicast_ip, port);
 

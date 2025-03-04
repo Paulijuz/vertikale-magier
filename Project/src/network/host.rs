@@ -21,7 +21,10 @@ pub struct Host<T: SendableType> {
     serve_thread_handle: Option<JoinHandle<()>>,
 }
 
-fn start_accept_thread<T: SendableType>(socket: Socket, new_client_channel_tx: Sender<(SocketAddrV4, Client<T>)>) -> JoinHandle<()> {
+fn start_accept_thread<T: SendableType>(
+    socket: Socket,
+    new_client_channel_tx: Sender<(SocketAddrV4, Client<T>)>,
+) -> JoinHandle<()> {
     spawn(move || loop {
         let Ok((client_socket, client_address)) = socket.accept() else {
             break;
@@ -36,10 +39,14 @@ fn start_accept_thread<T: SendableType>(socket: Socket, new_client_channel_tx: S
     })
 }
 
-fn start_serve_thread<T: SendableType>(new_client_channel_rx: Receiver<(SocketAddrV4, Client<T>)>, send_channel_rx: Receiver<(SocketAddrV4, T)>, receive_channel_tx: Sender<(SocketAddrV4, T)>) -> JoinHandle<()> {
+fn start_serve_thread<T: SendableType>(
+    new_client_channel_rx: Receiver<(SocketAddrV4, Client<T>)>,
+    send_channel_rx: Receiver<(SocketAddrV4, T)>,
+    receive_channel_tx: Sender<(SocketAddrV4, T)>,
+) -> JoinHandle<()> {
     spawn(move || {
         let mut clients: HashMap<SocketAddrV4, Client<T>> = HashMap::new();
-
+        
         loop {
             select! {
                 recv(new_client_channel_rx) -> new_client => {
@@ -80,8 +87,10 @@ impl<T: SendableType> Host<T> {
         let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, T)>();
         let (send_channel_tx, send_channel_rx) = unbounded::<(SocketAddrV4, T)>();
 
-        let accept_thread_handle = start_accept_thread(socket.try_clone().unwrap(), new_client_channel_tx);
-        let serve_thread_handle = start_serve_thread(new_client_channel_rx, send_channel_rx, receive_channel_tx);
+        let accept_thread_handle =
+            start_accept_thread(socket.try_clone().unwrap(), new_client_channel_tx);
+        let serve_thread_handle =
+            start_serve_thread(new_client_channel_rx, send_channel_rx, receive_channel_tx);
 
         Host {
             socket,

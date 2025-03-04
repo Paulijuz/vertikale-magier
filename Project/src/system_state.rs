@@ -37,14 +37,20 @@ impl From<&ElevatorState> for assigner::State {
 }
 
 impl fmt::Display for ElevatorState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let cab_requests_string = self.cab_requests
+            .iter()
+            .map(|&v| if v { "*" } else { "-" })
+            .collect::<Vec<_>>()
+            .join(" ");
+
         writeln!(
             f,
-            "Tilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger: {:?}",
+            "Tilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger:\n  1 2 3 4\n  {}",
             self.state,
             self.direction,
             self.floor + 1,
-            self.cab_requests
+            cab_requests_string,
         )
     }
 }
@@ -54,6 +60,16 @@ pub enum HallRequestState {
     Inactive,
     Requested,
     Assigned(String),
+}
+
+impl fmt::Display for HallRequestState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Inactive => f.pad("-"),
+            Self::Assigned(assignee) => f.pad(&format!("* ({assignee})")),
+            Self::Requested => f.pad("* (-)"),
+        }
+    }
 }
 
 impl Default for HallRequestState {
@@ -77,10 +93,15 @@ pub struct SystemState {
 }
 
 impl fmt::Display for SystemState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Iterasjon: {}", self.iteration)?;
         writeln!(f, "Heiser:")?;
-        for (id, elevator_state) in &self.elevators {
-            writeln!(f, "  {id}:")?;
+
+        let mut sorted_elevators: Vec<(&String, &ElevatorState)> = self.elevators.iter().collect::<Vec<_>>();
+        sorted_elevators.sort_by_key(|(name, _)| *name);
+
+        for (name, elevator_state) in sorted_elevators {
+            writeln!(f, "  {name}:")?;
 
             for line in elevator_state.to_string().lines() {
                 writeln!(f, "    {line}")?;
@@ -88,13 +109,15 @@ impl fmt::Display for SystemState {
         }
 
         writeln!(f, "Bestillinger:")?;
-        for (mut floor, hall_request) in self.hall_requests.iter().enumerate().rev() {
-            floor += 1;
+        writeln!(f, "  {:>6} | {:<16} | {:<16}", "Etasje", "Ned", "Opp")?;
 
+        for (floor, hall_request) in self.hall_requests.iter().enumerate().rev() {
             writeln!(
                 f,
-                "  Etasje {floor} - Ned: {:?}, Opp: {:?}",
-                hall_request.down, hall_request.up
+                "  {:>6} | {:<16} | {:<16}",
+                floor + 1,
+                hall_request.down,
+                hall_request.up,
             )?;
         }
 
@@ -137,14 +160,14 @@ impl SystemState {
         })
         .unwrap();
 
-        for (id, assigned_hall_requests) in assignments.iter() {
+        for (name, assigned_hall_requests) in assignments.iter() {
             for (floor, (up, down)) in assigned_hall_requests.iter().enumerate() {
                 if *up {
-                    self.hall_requests[floor].up = HallRequestState::Assigned(id.to_string());
+                    self.hall_requests[floor].up = HallRequestState::Assigned(name.to_string());
                 }
 
                 if *down {
-                    self.hall_requests[floor].down = HallRequestState::Assigned(id.to_string());
+                    self.hall_requests[floor].down = HallRequestState::Assigned(name.to_string());
                 }
             }
         }

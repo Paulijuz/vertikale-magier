@@ -1,8 +1,8 @@
-use crate::network::elevator_monitor::ElevatorMonitor;
 use crossbeam_channel::{select, tick, unbounded, Receiver, Sender};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{
+    io::Result,
     net::SocketAddrV4,
     thread::{spawn, JoinHandle},
     time::Duration,
@@ -10,17 +10,30 @@ use std::{
 };
 
 use super::client::{Client, SendableType};
+use crate::network::elevator_monitor::ElevatorMonitor;
 
 const ADVERTISING_INTERVAL: Duration = Duration::from_secs(1);
-// Use port 52052 and 239.0.0.52 for group 52 <3
-const ADVERTISING_IP: [u8; 4] = [239, 0, 0, 52];
-const ADVERTISING_PORT: u16 = 52052;
 const ADVERTISER_ID_LENGTH: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Advertisment<T: Clone> {
     sender_id: [u8; ADVERTISER_ID_LENGTH],
     data: T,
+}
+
+fn generate_advertiser_id() -> [u8; ADVERTISER_ID_LENGTH] {
+    let mut buffer = [0; ADVERTISER_ID_LENGTH];
+    rand::rng().fill_bytes(&mut buffer);
+    return buffer;
+}
+
+impl<T: Clone> Advertisment<T> {
+    fn new(data: T) -> Self {
+        Self {
+            sender_id: generate_advertiser_id(),
+            data,
+        }
+    }
 }
 
 enum AdvertiserCommand<T> {
@@ -36,20 +49,65 @@ pub struct Advertiser<T: SendableType + Clone> {
     thread: Option<JoinHandle<()>>,
 }
 
+fn run_advertiser<T: SendableType + Clone>(
+    data: T,
+    client: Client<Advertisment<T>>,
+    control_channel_rx: Receiver<AdvertiserCommand<T>>,
+    receive_channel_tx: Sender<(SocketAddrV4, T)>,
+) {
+    let mut advertisment = Advertisment::new(data);
+    let mut is_advertising = false;
+
+    let ticker = tick(ADVERTISING_INTERVAL);
+    let elevator_monitor = ElevatorMonitor::new();
+
+    loop {
+        select! {
+            recv(control_channel_rx) -> command => {
+                match command.unwrap() {
+                    AdvertiserCommand::Start => is_advertising = true,
+                    AdvertiserCommand::Stop => is_advertising = false,
+                    AdvertiserCommand::SetAdvertisment(data) => advertisment = Advertisment::new(data),
+                    AdvertiserCommand::Exit => break,
+                }
+            },
+            recv(ticker) -> _ => {
+                if is_advertising {
+                    continue;
+                }
+
+                client.send_channel().send(advertisment.clone()).unwrap();
+            },
+            recv(client.receive_channel()) -> data => {
+                let (address, received_advertisment) = data.unwrap();
+
+                if received_advertisment.sender_id == advertisment.sender_id {
+                    continue;
+                }
+
+                receive_channel_tx.send((address, received_advertisment.data)).unwrap();
+                elevator_monitor.send_heartbeat(received_advertisment.sender_id);
+            },
+        }
+    }
+}
+
 impl<T: SendableType + Clone> Advertiser<T> {
-    pub fn new(advertisment: T) -> Self {
+    pub fn new(advertisment: T, multicast_ip: [u8; 4], port: u16) -> Result<Self> {
+        let client: Client<Advertisment<T>> = Client::new_udp_multicast_client(multicast_ip, port)?;
+
         let (control_channel_tx, control_channel_rx) = unbounded::<AdvertiserCommand<T>>();
         let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, T)>();
 
-        let thread = Some(spawn(move || {
-            run_advertiser(advertisment, control_channel_rx, receive_channel_tx)
-        }));
+        let thread = spawn(move || {
+            run_advertiser(advertisment, client, control_channel_rx, receive_channel_tx)
+        });
 
-        Advertiser {
+        Ok(Advertiser {
             control_channel_tx,
             receive_channel_rx,
-            thread,
-        }
+            thread: Some(thread),
+        })
     }
 
     pub fn start_advertising(&self) {
@@ -81,71 +139,5 @@ impl<T: SendableType + Clone> Drop for Advertiser<T> {
             .send(AdvertiserCommand::Exit)
             .unwrap();
         self.thread.take().unwrap().join().unwrap();
-    }
-}
-
-fn generate_advertiser_id() -> [u8; ADVERTISER_ID_LENGTH] {
-    let mut buffer = [0; ADVERTISER_ID_LENGTH];
-    rand::rng().fill_bytes(&mut buffer);
-    return buffer;
-}
-
-fn run_advertiser<T: SendableType + Clone>(
-    advertisment_data: T,
-    control_channel_rx: Receiver<AdvertiserCommand<T>>,
-    receive_channel_tx: Sender<(SocketAddrV4, T)>,
-) {
-    let mut advertisment = Advertisment {
-        sender_id: generate_advertiser_id(),
-        data: advertisment_data,
-    };
-
-    let client: Client<Advertisment<T>> =
-        Client::new_udp_multicast_client(ADVERTISING_IP, ADVERTISING_PORT);
-    let ticker = tick(ADVERTISING_INTERVAL);
-
-    let mut is_advertising = false;
-
-    let elevator_monitor = ElevatorMonitor::new();
-
-    loop {
-        select! {
-            recv(control_channel_rx) -> command => {
-                match command.unwrap() {
-                    AdvertiserCommand::Start => {
-                        if is_advertising {
-                            continue;
-                        }
-
-                        is_advertising = true;
-                    },
-                    AdvertiserCommand::Stop => is_advertising = false,
-                    AdvertiserCommand::SetAdvertisment(new_advertisment_data) => {
-                        advertisment = Advertisment {
-                            sender_id: generate_advertiser_id(),
-                            data: new_advertisment_data,
-                        };
-                    },
-                    AdvertiserCommand::Exit => break,
-                }
-            },
-            recv(ticker) -> _ => {
-                if !is_advertising {
-                    continue;
-                }
-
-                client.send_channel().send(advertisment.clone()).unwrap();
-            },
-            recv(client.receive_channel()) -> data => {
-                let (address, received_advertisment) = data.unwrap();
-
-                if received_advertisment.sender_id == advertisment.sender_id {
-                    continue;
-                }
-
-                receive_channel_tx.send((address, received_advertisment.data)).unwrap();
-                elevator_monitor.send_heartbeat(received_advertisment.sender_id);
-            },
-        }
     }
 }

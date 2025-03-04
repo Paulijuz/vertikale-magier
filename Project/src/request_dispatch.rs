@@ -15,6 +15,9 @@ use crate::network::{advertiser::Advertiser, Client, Host};
 use crate::requests::requests::{Direction, Requests};
 use crate::system_state::{ElevatorState, HallRequestState, SystemState};
 
+const MASTER_ADVERTISMENT_IP: [u8; 4] = [239, 0, 0, 52];
+const MASTER_ADVERTISMENT_PORT: u16 = 52052;
+
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
 pub fn start_master_server() {
     // Load state from backup if available
@@ -29,11 +32,16 @@ pub fn start_master_server() {
         }
     };
 
-    let host = Host::<SystemState>::new_tcp_host(None);
+    let host = Host::<SystemState>::new_tcp_host(0).unwrap();
     info!("Master lytter på port: {}", host.port());
 
     // Start å informere slaver om at master eksisterer
-    let advertiser = Advertiser::new(host.port());
+    let advertiser = Advertiser::new(
+        host.port(),
+        MASTER_ADVERTISMENT_IP,
+        MASTER_ADVERTISMENT_PORT,
+    )
+    .unwrap();
     advertiser.start_advertising();
 
     let mut slave_addresses: HashSet<SocketAddrV4> = HashSet::new();
@@ -104,7 +112,7 @@ pub fn start_slave_client(
 ) {
     let input_channels = inputs::InputChannels::new(elevio_elevator);
 
-    let advertiser = Advertiser::new(0u16);
+    let advertiser = Advertiser::new(0, MASTER_ADVERTISMENT_IP, MASTER_ADVERTISMENT_PORT).unwrap();
 
     info!("Leter etter en master...");
     let (master_address, master_port) = advertiser.receive_channel().recv().unwrap();

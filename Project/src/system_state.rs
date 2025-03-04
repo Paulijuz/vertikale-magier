@@ -38,7 +38,8 @@ impl From<&ElevatorState> for assigner::State {
 
 impl fmt::Display for ElevatorState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let cab_requests_string = self.cab_requests
+        let cab_requests_string = self
+            .cab_requests
             .iter()
             .map(|&v| if v { "*" } else { "-" })
             .collect::<Vec<_>>()
@@ -97,7 +98,8 @@ impl fmt::Display for SystemState {
         writeln!(f, "Iterasjon: {}", self.iteration)?;
         writeln!(f, "Heiser:")?;
 
-        let mut sorted_elevators: Vec<(&String, &ElevatorState)> = self.elevators.iter().collect::<Vec<_>>();
+        let mut sorted_elevators: Vec<(&String, &ElevatorState)> =
+            self.elevators.iter().collect::<Vec<_>>();
         sorted_elevators.sort_by_key(|(name, _)| *name);
 
         for (name, elevator_state) in sorted_elevators {

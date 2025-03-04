@@ -1,34 +1,53 @@
 {
-  "elevators": {
-    "TestHeis": {
-      "name": "TestHeis",
-      "direction": "Up",
-      "state": "Idle",
-      "floor": 3,
-      "cab_requests": [
-        false,
-        false,
-        true,
-        false
-      ]
-    }
-  },
+  "elevators": {},
   "hall_requests": [
     {
       "up": "Inactive",
-      "down": "Inactive"
+      "down": "Inactive",
+      "timestamp_assigned_request": {
+        "secs_since_epoch": 1741093087,
+        "nanos_since_epoch": 291601200
+      },
+      "timestamp_dispatches_request": {
+        "secs_since_epoch": 1741093087,
+        "nanos_since_epoch": 291601200
+      }
     },
     {
       "up": "Inactive",
-      "down": "Inactive"
+      "down": "Inactive",
+      "timestamp_assigned_request": {
+        "secs_since_epoch": 1741093087,
+        "nanos_since_epoch": 291605500
+      },
+      "timestamp_dispatches_request": {
+        "secs_since_epoch": 1741093087,
+        "nanos_since_epoch": 291605500
+      }
     },
     {
       "up": "Inactive",
-      "down": "Inactive"
+      "down": "Inactive",
+      "timestamp_assigned_request": {
+        "secs_since_epoch": 1741093087,
+        "nanos_since_epoch": 291605500
+      },
+      "timestamp_dispatches_request": {
+        "secs_since_epoch": 1741093087,
+        "nanos_since_epoch": 291605600
+      }
     },
     {
       "up": "Inactive",
-      "down": "Inactive"
+      "down": "Inactive",
+      "timestamp_assigned_request": {
+        "secs_since_epoch": 1741093087,
+        "nanos_since_epoch": 291605600
+      },
+      "timestamp_dispatches_request": {
+        "secs_since_epoch": 1741093087,
+        "nanos_since_epoch": 291605700
+      }
     }
   ]
 }

@@ -84,8 +84,8 @@ enum HallRequestState {
 pub struct HallRequest {
     up: HallRequestState,
     down: HallRequestState,
-    timestamp_assigned_request : SystemTime,
-    timestamp_dispatches_request : SystemTime,
+    timestamp_assigned_request : Option<SystemTime>,
+    timestamp_dispatches_request : Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +130,9 @@ impl AllElevatorStates {
             hall_requests: array::from_fn(|_| HallRequest {
                 up: HallRequestState::Inactive,
                 down: HallRequestState::Inactive,
+                timestamp_assigned_request: Some(SystemTime::now()),
+                timestamp_dispatches_request: Some(SystemTime::now()),
+
             }),
         }
     }
@@ -137,12 +140,16 @@ impl AllElevatorStates {
     // Velger beste heis for en bestilling
     pub fn assign_request(&mut self, floor: u8, direction: Direction) {
         
-        let mut timestamp_assigned_request = SystemTime::now();
+        let timestamp_assigned_request = SystemTime::now();
 
         match direction {
-            Direction::Up => self.hall_requests[floor as usize].up = HallRequestState::Requested,
+            Direction::Up => {
+                self.hall_requests[floor as usize].up = HallRequestState::Requested;
+                self.hall_requests[floor as usize].timestamp_assigned_request = Some(timestamp_assigned_request);
+            }
             Direction::Down => {
-                self.hall_requests[floor as usize].down = HallRequestState::Requested
+                self.hall_requests[floor as usize].down = HallRequestState::Requested;
+                self.hall_requests[floor as usize].timestamp_assigned_request = Some(timestamp_assigned_request);
             }
             _ => panic!("Tried to assign request with invalid direction"),
         }
@@ -205,7 +212,7 @@ impl AllElevatorStates {
 pub fn start_master_server() {
 
     let mut master_elevator_states = AllElevatorStates::new();
-
+    
     // Load state from backup if available
     if let Ok(state) = load_state_from_file("backup.json") {
         master_elevator_states = state;
@@ -263,16 +270,17 @@ pub fn start_master_server() {
             // Start å informere slaver om at master eksisterer
             recv(ticker) -> _message => {
                 // Hent nåværende tidspunkt
-                let timestamp_now_sms = SystemTime::now();
-            
+                let timestamp_start_master_server = SystemTime::now();
+
                 // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
-                for elevator in master_elevator_states.elevators.values() {
-                    let timestamp_assigned_request = elevator.timestamp_assigned_request;
-            
-                    if let Ok(duration) = timestamp_now_sms.duration_since(timestamp_assigned_request) {
+                for elevator in &master_elevator_states.hall_requests {
+                    if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_assigned_request.unwrap())
+                     {
                         if duration < Duration::from_secs(5) {
                             println!("Det har gått mindre enn 5 sekunder siden forespørselen ble tildelt.");
+                            break;
                         } else {
+                            //se bort i fra heisen, kall på den funksjonen når implementert
                             println!("Mer enn 5 sekunder har gått siden forespørselen ble tildelt.");
                         }
                     }

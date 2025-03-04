@@ -98,7 +98,7 @@ impl<T: SendableType> Client<T> {
     }
     pub fn new_multicast_client(multicast_ip: [u8; 4], port: u16) -> Self {
         let multicast_ip = Ipv4Addr::from(multicast_ip);
-        let address = SocketAddrV4::new(multicast_ip, port);
+        let address = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
 
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).unwrap();
         socket.set_reuse_address(true).unwrap();

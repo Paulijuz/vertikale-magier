@@ -2,7 +2,7 @@ use crossbeam_channel::{self as cbc, tick};
 use crossbeam_channel::select;
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
 use std::time::{Duration, SystemTime};
 
@@ -97,10 +97,18 @@ pub fn start_master_server() {
                 let timestamp_start_master_server = SystemTime::now();
                 let mut changed = false;
 
+                let requests_map: HashMap<_, _> = worldview
+                    .elevators
+                    .keys()
+                    .map(|name| (name.clone(), worldview.requests_for_elevator(name)))
+                    .collect();
+
                 // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
-                for elevator in worldview.elevators.values_mut() {
+                for (name, elevator) in &mut worldview.elevators {
                     if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
-                        if duration > Duration::from_secs(5) {
+                        let has_orders = requests_map[name].unwrap().iter().any(|v| v.hall_up || v.hall_down || v.cab);
+
+                        if has_orders && duration > Duration::from_secs(5) {
                             elevator.active = false;
                             changed = true;
                         }

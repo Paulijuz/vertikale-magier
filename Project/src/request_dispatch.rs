@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::array;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
+use crossbeam_channel::tick;
+use std::time::{Duration, Instant, SystemTime};
 
 
 
@@ -82,6 +84,8 @@ enum HallRequestState {
 pub struct HallRequest {
     up: HallRequestState,
     down: HallRequestState,
+    timestamp_assigned_request : SystemTime,
+    timestamp_dispatches_request : SystemTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +136,9 @@ impl AllElevatorStates {
 
     // Velger beste heis for en bestilling
     pub fn assign_request(&mut self, floor: u8, direction: Direction) {
+        
+        let mut timestamp_assigned_request = SystemTime::now();
+
         match direction {
             Direction::Up => self.hall_requests[floor as usize].up = HallRequestState::Requested,
             Direction::Down => {
@@ -215,7 +222,7 @@ pub fn start_master_server() {
     
     let mut slave_addresses: HashSet<SocketAddrV4> = HashSet::new();
     
-    
+    let ticker = tick(Duration::from_millis(100));
 
     loop {
         select! {
@@ -246,10 +253,29 @@ pub fn start_master_server() {
                         _ => {},
                     }
                 }
-
+                
                 // Informere alle slaver om nye bestillinger
                 for slave_address in &slave_addresses {
                     master.send_channel().send((*slave_address, master_elevator_states.to_owned())).unwrap();
+                }
+                let mut _timestamp_start_master_server = SystemTime::now();
+            },
+            // Start å informere slaver om at master eksisterer
+            recv(ticker) -> _message => {
+                // Hent nåværende tidspunkt
+                let timestamp_now_sms = SystemTime::now();
+            
+                // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
+                for elevator in master_elevator_states.elevators.values() {
+                    let timestamp_assigned_request = elevator.timestamp_assigned_request;
+            
+                    if let Ok(duration) = timestamp_now_sms.duration_since(timestamp_assigned_request) {
+                        if duration < Duration::from_secs(5) {
+                            println!("Det har gått mindre enn 5 sekunder siden forespørselen ble tildelt.");
+                        } else {
+                            println!("Mer enn 5 sekunder har gått siden forespørselen ble tildelt.");
+                        }
+                    }
                 }
             }
         }
@@ -257,9 +283,12 @@ pub fn start_master_server() {
             error!("klarte ikke lagre tilstanden: {}", e);
             info!("master_elevator_states er lagret i back-upen")
         }
+        
+
     }
     
 }
+
 
 /// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
 pub fn start_slave_client(

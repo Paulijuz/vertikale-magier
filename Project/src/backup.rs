@@ -28,4 +28,3 @@ pub fn save_state_to_file(state: &AllElevatorStates, file_path: &str) -> Result<
     Ok(())
 }
     
-

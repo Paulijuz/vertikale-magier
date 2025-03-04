@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt};
 
 use crate::{
-    elevator::controller::State,
+    elevator::controller::Behaviour,
     requests::{
         assigner,
         requests::{Direction, Request, Requests, NUMBER_OF_FLOORS},
@@ -12,7 +12,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ElevatorState {
     pub direction: Direction,
-    pub state: State,
+    pub state: Behaviour,
     pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
 }
@@ -21,8 +21,8 @@ impl From<&ElevatorState> for assigner::State {
     fn from(single_elevator_state: &ElevatorState) -> Self {
         assigner::State {
             behaviour: match single_elevator_state.state {
-                State::DoorOpen => assigner::Behaviour::DoorOpen,
-                State::Moving => assigner::Behaviour::Moving,
+                Behaviour::DoorOpen => assigner::Behaviour::DoorOpen,
+                Behaviour::Moving => assigner::Behaviour::Moving,
                 _ => assigner::Behaviour::Idle,
             },
             floor: single_elevator_state.floor,
@@ -86,14 +86,14 @@ pub struct HallRequest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SystemState {
+pub struct Worldview {
     pub name: String,
     pub elevators: HashMap<String, ElevatorState>, //Liste over alle aktive heiser
     pub hall_requests: [HallRequest; NUMBER_OF_FLOORS],
     pub iteration: i32,
 }
 
-impl fmt::Display for SystemState {
+impl fmt::Display for Worldview {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Iterasjon: {}", self.iteration)?;
         writeln!(f, "Heiser:")?;
@@ -127,7 +127,7 @@ impl fmt::Display for SystemState {
     }
 }
 
-impl SystemState {
+impl Worldview {
     pub fn new(name: String) -> Self {
         Self {
             name,
@@ -201,7 +201,7 @@ impl SystemState {
         self.elevators
             .insert(self.name.clone(), local_elevator_state.clone());
     }
-    pub fn sync_with_master(&mut self, master_state: SystemState) {
+    pub fn sync_with_master(&mut self, master_state: Worldview) {
         *self = Self {
             name: self.name.clone(),
             ..master_state

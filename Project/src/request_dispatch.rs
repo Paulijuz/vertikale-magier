@@ -7,13 +7,13 @@ use std::net::SocketAddrV4;
 
 use crate::backup::{load_state_from_file, save_state_to_file};
 use crate::elevator::{
-    controller::{ElevatorEvent, State},
+    controller::{ElevatorEvent, Behaviour},
     inputs,
     lights::set_call_lights,
 };
 use crate::network::{advertiser::Advertiser, Client, Host};
 use crate::requests::requests::{Direction, Requests};
-use crate::system_state::{ElevatorState, HallRequestState, SystemState};
+use crate::worldview::{ElevatorState, HallRequestState, Worldview};
 
 const MASTER_ADVERTISMENT_IP: [u8; 4] = [239, 0, 0, 52];
 const MASTER_ADVERTISMENT_PORT: u16 = 52052;
@@ -28,11 +28,11 @@ pub fn start_master_server() {
         }
         Err(_) => {
             info!("No backup found.");
-            SystemState::new(String::from("Master"))
+            Worldview::new(String::from("Master"))
         }
     };
 
-    let host = Host::<SystemState>::new_tcp_host(0).unwrap();
+    let host = Host::<Worldview>::new_tcp_host(0).unwrap();
     info!("Master lytter på port: {}", host.port());
 
     // Start å informere slaver om at master eksisterer
@@ -94,8 +94,8 @@ pub fn start_master_server() {
 }
 
 pub fn send_state_to_maser(
-    client: &Client<SystemState>,
-    mut system_state: SystemState,
+    client: &Client<Worldview>,
+    mut system_state: Worldview,
     local_elevator_state: ElevatorState,
 ) {
     system_state.set_local_elevator_state(local_elevator_state);
@@ -118,7 +118,7 @@ pub fn start_slave_client(
     let (master_address, master_port) = advertiser.receive_channel().recv().unwrap();
     info!("Fant en master: {master_address} {master_port}");
 
-    let client: Client<SystemState> =
+    let client: Client<Worldview> =
         Client::new_tcp_client(master_address.ip().octets(), master_port).unwrap();
     info!("Koblet til master!");
 
@@ -126,13 +126,13 @@ pub fn start_slave_client(
     let name = name.unwrap_or(petname::petname(1, "").unwrap());
 
     let mut local_elevator_state = ElevatorState {
-        state: State::Idle,
+        state: Behaviour::Idle,
         cab_requests: [false; 4],
         direction: Direction::Up,
         floor: 0,
     };
 
-    let mut system_state = SystemState::new(name);
+    let mut system_state = Worldview::new(name);
 
     loop {
         cbc::select! {

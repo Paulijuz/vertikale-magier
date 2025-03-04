@@ -17,7 +17,7 @@ use super::inputs;
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum State {
+pub enum Behaviour {
     Idle,
     Moving,
     DoorOpen,
@@ -26,7 +26,7 @@ pub enum State {
 
 pub struct ElevatorEvent {
     pub direction: Direction,
-    pub state: State,
+    pub state: Behaviour,
     pub floor: u8,
 }
 
@@ -34,7 +34,7 @@ pub struct ElevatorEvent {
 struct ElevatorController<'e> {
     elevio_driver: &'e elevio::elev::Elevator,
     door_timer: Timer,
-    fsm_state: State,
+    behaviour: Behaviour,
     direction: Direction,
     obstruction: bool,
     last_floor: Option<u8>,
@@ -46,7 +46,7 @@ impl<'e> ElevatorController<'e> {
         Self {
             elevio_driver,
             door_timer: Timer::init(DOOR_OPEN_DURATION),
-            fsm_state: State::Idle,
+            behaviour: Behaviour::Idle,
             direction: Direction::Stopped,
             obstruction: true, // Assume worst until we hear otherwise from driver
             last_floor: Some(0),
@@ -54,7 +54,7 @@ impl<'e> ElevatorController<'e> {
         }
     }
 
-    fn next_direction(&self) -> (Direction, State) {
+    fn next_direction(&self) -> (Direction, Behaviour) {
         let floor = self
             .last_floor
             .expect("Called next direction without known floor.") as usize;
@@ -62,39 +62,39 @@ impl<'e> ElevatorController<'e> {
         match self.direction {
             Direction::Up => {
                 return if requests_above_floor(&self.requests, floor) {
-                    (Direction::Up, State::Moving)
+                    (Direction::Up, Behaviour::Moving)
                 } else if requests_at_floor(&self.requests, floor, Some(Direction::Up)) {
-                    (Direction::Up, State::DoorOpen)
+                    (Direction::Up, Behaviour::DoorOpen)
                 } else if requests_at_floor(&self.requests, floor, None) {
-                    (Direction::Down, State::DoorOpen)
+                    (Direction::Down, Behaviour::DoorOpen)
                 } else if requests_below_floor(&self.requests, floor) {
-                    (Direction::Down, State::Moving)
+                    (Direction::Down, Behaviour::Moving)
                 } else {
-                    (Direction::Stopped, State::Idle)
+                    (Direction::Stopped, Behaviour::Idle)
                 }
             }
             Direction::Down => {
                 return if requests_below_floor(&self.requests, floor) {
-                    (Direction::Down, State::Moving)
+                    (Direction::Down, Behaviour::Moving)
                 } else if requests_at_floor(&self.requests, floor, Some(Direction::Down)) {
-                    (Direction::Down, State::DoorOpen)
+                    (Direction::Down, Behaviour::DoorOpen)
                 } else if requests_at_floor(&self.requests, floor, None) {
-                    (Direction::Up, State::DoorOpen)
+                    (Direction::Up, Behaviour::DoorOpen)
                 } else if requests_above_floor(&self.requests, floor) {
-                    (Direction::Up, State::Moving)
+                    (Direction::Up, Behaviour::Moving)
                 } else {
-                    (Direction::Stopped, State::Idle)
+                    (Direction::Stopped, Behaviour::Idle)
                 }
             }
             Direction::Stopped => {
                 return if requests_at_floor(&self.requests, floor, None) {
-                    (Direction::Stopped, State::DoorOpen)
+                    (Direction::Stopped, Behaviour::DoorOpen)
                 } else if requests_above_floor(&self.requests, floor) {
-                    (Direction::Up, State::Moving)
+                    (Direction::Up, Behaviour::Moving)
                 } else if requests_below_floor(&self.requests, floor) {
-                    (Direction::Down, State::Moving)
+                    (Direction::Down, Behaviour::Moving)
                 } else {
-                    (Direction::Stopped, State::Idle)
+                    (Direction::Stopped, Behaviour::Idle)
                 }
             }
         }
@@ -120,7 +120,7 @@ impl<'e> ElevatorController<'e> {
     }
     fn transision_to_moving(&mut self) {
         debug!("Bytter til tilstand \"kjører\".");
-        self.fsm_state = State::Moving;
+        self.behaviour = Behaviour::Moving;
 
         match self.direction {
             Direction::Up => {
@@ -136,7 +136,7 @@ impl<'e> ElevatorController<'e> {
     }
     fn transision_to_door_open(&mut self) {
         debug!("Bytter til tilstand \"dør åpen\".");
-        self.fsm_state = State::DoorOpen;
+        self.behaviour = Behaviour::DoorOpen;
 
         self.elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
         self.elevio_driver.door_light(true);
@@ -146,7 +146,7 @@ impl<'e> ElevatorController<'e> {
     }
     fn transision_to_idle(&mut self) {
         debug!("Bytter til tilstand \"inaktiv\".");
-        self.fsm_state = State::Idle;
+        self.behaviour = Behaviour::Idle;
     }
 }
 
@@ -165,8 +165,8 @@ pub fn controller_loop(
                 debug!("Recieved new requests: {:?}", requests);
 
                 controller.requests = requests;
-                debug!("{:?}", controller.fsm_state);
-                if controller.fsm_state != State::Idle {
+                debug!("{:?}", controller.behaviour);
+                if controller.behaviour != Behaviour::Idle {
                     continue;
                 }
 
@@ -174,15 +174,15 @@ pub fn controller_loop(
                 controller.direction = next_direction;
 
                 match next_state {
-                    State::DoorOpen => controller.transision_to_door_open(),
-                    State::Moving => controller.transision_to_moving(),
+                    Behaviour::DoorOpen => controller.transision_to_door_open(),
+                    Behaviour::Moving => controller.transision_to_moving(),
                     _ => {},
                 }
 
-                if controller.fsm_state != State::Idle {
+                if controller.behaviour != Behaviour::Idle {
                     elevator_event_tx.send(ElevatorEvent {
                         direction: controller.direction,
-                        state: controller.fsm_state,
+                        state: controller.behaviour,
                         floor: controller.last_floor.unwrap(),
                     }).unwrap();
                 } else {
@@ -196,7 +196,7 @@ pub fn controller_loop(
                 elevio_elevator.floor_indicator(floor); // TODO: Bruk sync lights her kanskje?
                 controller.last_floor = Some(floor);
 
-                if controller.fsm_state != State::Moving {
+                if controller.behaviour != Behaviour::Moving {
                     continue;
                 }
 
@@ -206,7 +206,7 @@ pub fn controller_loop(
 
                 elevator_event_tx.send(ElevatorEvent {
                     direction: controller.direction,
-                    state: controller.fsm_state,
+                    state: controller.behaviour,
                     floor: controller.last_floor.unwrap(),
                 }).unwrap();
             },
@@ -219,7 +219,7 @@ pub fn controller_loop(
                 }
 
                 elevio_elevator.motor_direction(elevio::elev::DIRN_STOP);
-                controller.fsm_state = State::OutOfOrder;
+                controller.behaviour = Behaviour::OutOfOrder;
             },
             recv(input_channels.obstruction_rx) -> obstruction_switch => {
                 controller.obstruction = obstruction_switch.unwrap();
@@ -240,15 +240,15 @@ pub fn controller_loop(
                 dbg!(next_direction);
 
                 match next_state {
-                    State::DoorOpen => controller.transision_to_door_open(),
-                    State::Moving => controller.transision_to_moving(),
-                    State::Idle => controller.transision_to_idle(),
+                    Behaviour::DoorOpen => controller.transision_to_door_open(),
+                    Behaviour::Moving => controller.transision_to_moving(),
+                    Behaviour::Idle => controller.transision_to_idle(),
                     _ => {},
                 }
 
                 elevator_event_tx.send(ElevatorEvent {
                     direction: controller.direction,
-                    state: controller.fsm_state,
+                    state: controller.behaviour,
                     floor: controller.last_floor.unwrap(),
                 }).unwrap();
             },

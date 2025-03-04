@@ -45,7 +45,7 @@ fn main() {
     }
 
     if args.slave {
-        let elevio_driver: elevio::elev::Elevator =
+        let elevio_driver =
             elevio::elev::Elevator::init(&format!("localhost:{}", args.port), 4).unwrap();
 
         let (command_channel_tx, command_channel_rx) = cbc::unbounded();

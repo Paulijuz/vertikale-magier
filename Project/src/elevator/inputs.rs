@@ -21,15 +21,15 @@ fn create_poll_channel<T: Send + 'static>(
     inital_function: Option<fn(&Elevator) -> T>,
 ) -> cbc::Receiver<T> {
     let elevator = elevator.to_owned();
-    let (tx, rx) = cbc::unbounded::<T>();
+    let (channel_tx, channel_rx) = cbc::unbounded::<T>();
 
     if let Some(inital_function) = inital_function {
-        tx.send(inital_function(&elevator)).unwrap();
+        channel_tx.send(inital_function(&elevator)).unwrap();
     }
 
-    spawn(move || poll_function(elevator, tx, POLL_PERIOD));
+    spawn(move || poll_function(elevator, channel_tx, POLL_PERIOD));
 
-    rx
+    channel_rx
 }
 
 impl InputChannels {

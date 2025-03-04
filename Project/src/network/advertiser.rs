@@ -6,7 +6,6 @@ use std::{
     net::SocketAddrV4,
     thread::{spawn, JoinHandle},
     time::Duration,
-    u8,
 };
 
 use super::client::{Client, SendableType};
@@ -19,21 +18,6 @@ const ADVERTISER_ID_LENGTH: usize = 16;
 pub struct Advertisment<T: Clone> {
     sender_id: [u8; ADVERTISER_ID_LENGTH],
     data: T,
-}
-
-fn generate_advertiser_id() -> [u8; ADVERTISER_ID_LENGTH] {
-    let mut buffer = [0; ADVERTISER_ID_LENGTH];
-    rand::rng().fill_bytes(&mut buffer);
-    return buffer;
-}
-
-impl<T: Clone> Advertisment<T> {
-    fn new(data: T) -> Self {
-        Self {
-            sender_id: generate_advertiser_id(),
-            data,
-        }
-    }
 }
 
 enum AdvertiserCommand<T> {
@@ -49,13 +33,22 @@ pub struct Advertiser<T: SendableType + Clone> {
     thread: Option<JoinHandle<()>>,
 }
 
+fn generate_sender_id() -> [u8; ADVERTISER_ID_LENGTH] {
+    let mut buffer = [0; ADVERTISER_ID_LENGTH];
+    rand::rng().fill_bytes(&mut buffer);
+    return buffer;
+}
+
 fn run_advertiser<T: SendableType + Clone>(
     data: T,
     client: Client<Advertisment<T>>,
     control_channel_rx: Receiver<AdvertiserCommand<T>>,
     receive_channel_tx: Sender<(SocketAddrV4, T)>,
 ) {
-    let mut advertisment = Advertisment::new(data);
+    let mut advertisment = Advertisment {
+        sender_id: generate_sender_id(),
+        data,
+    };
     let mut is_advertising = false;
 
     let ticker = tick(ADVERTISING_INTERVAL);
@@ -67,12 +60,12 @@ fn run_advertiser<T: SendableType + Clone>(
                 match command.unwrap() {
                     AdvertiserCommand::Start => is_advertising = true,
                     AdvertiserCommand::Stop => is_advertising = false,
-                    AdvertiserCommand::SetAdvertisment(data) => advertisment = Advertisment::new(data),
+                    AdvertiserCommand::SetAdvertisment(data) => advertisment.data = data,
                     AdvertiserCommand::Exit => break,
                 }
             },
             recv(ticker) -> _ => {
-                if is_advertising {
+                if !is_advertising {
                     continue;
                 }
 

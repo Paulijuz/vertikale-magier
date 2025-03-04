@@ -53,22 +53,22 @@ pub fn start_master_server() {
         select! {
             recv(host.receive_channel()) -> message => {
                 let (address, recieved_elevator_states) = message.unwrap();
+                let received_name = &recieved_elevator_states.name;
+
                 slave_addresses.insert(address);
 
-                info!("Master mottok melding fra \"{}\":\n{}", &recieved_elevator_states.name, recieved_elevator_states);
+                info!("Master mottok melding fra \"{}\":\n{}", received_name, recieved_elevator_states);
 
-                // Legg til nye heiser
-                for elevator_state in recieved_elevator_states.elevators.values() {
-                    if let Some(elevator) = worldview.elevators.get(&recieved_elevator_states.name) {
-                        if !elevator.active {
-                            info!("Aktiverer \"{}\" :)", &recieved_elevator_states.name);
-                        }
-                    } else {
-                        info!("Ny slave tilkoblet \"{}\"", &recieved_elevator_states.name);
+               // Legg til nye heiser
+                if let Some(elevator) = worldview.elevators.get(received_name) {
+                    if !elevator.active {
+                        info!("Aktiverer \"{}\" :)", received_name);
                     }
-
-                    worldview.elevators.insert(recieved_elevator_states.name.clone(), elevator_state.clone());
+                } else {
+                    info!("Ny slave tilkoblet \"{}\"", received_name);
                 }
+
+                worldview.elevators.insert(recieved_elevator_states.name.clone(), recieved_elevator_states.elevators[received_name].clone());
 
                 if recieved_elevator_states.iteration - worldview.iteration == 1 {
                      // Ta imot nye og slett fullførte bestillinger

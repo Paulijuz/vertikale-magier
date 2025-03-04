@@ -114,7 +114,6 @@ pub fn start_master_server() {
                 // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
                 for (name, elevator) in &mut worldview.elevators {
                     if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
-                        dbg!(duration);
                         let has_orders = requests_map[name].unwrap().iter().any(|v| v.hall_up || v.hall_down || v.cab);
 
                         if elevator.active && has_orders && duration > Duration::from_secs(5) {

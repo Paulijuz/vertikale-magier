@@ -50,7 +50,8 @@ impl fmt::Display for ElevatorState {
 
         writeln!(
             f,
-            "Tilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger:\n  1 2 3 4\n  {}",
+            "Aktiv: {}\n, Tilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger:\n  1 2 3 4\n  {}",
+            self.active,
             self.state,
             self.direction,
             self.floor + 1,

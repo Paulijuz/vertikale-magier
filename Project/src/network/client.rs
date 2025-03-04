@@ -8,7 +8,7 @@ use std::{
     thread::{spawn, JoinHandle},
 };
 
-const BUFFER_SIZE: usize = 1024;
+const BUFFER_SIZE: usize = 4096;
 
 pub trait SendableType: Serialize + de::DeserializeOwned + Send + 'static {}
 impl<T: Serialize + de::DeserializeOwned + Send + 'static> SendableType for T {}

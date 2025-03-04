@@ -59,6 +59,14 @@ pub fn start_master_server() {
 
                 // Legg til nye heiser
                 for elevator_state in recieved_elevator_states.elevators.values() {
+                    if let Some(elevator) = worldview.elevators.get(&recieved_elevator_states.name) {
+                        if !elevator.active {
+                            info!("Aktiverer \"{}\" :)", &recieved_elevator_states.name);
+                        }
+                    } else {
+                        info!("Ny slave tilkoblet \"{}\"", &recieved_elevator_states.name);
+                    }
+
                     worldview.elevators.insert(recieved_elevator_states.name.clone(), elevator_state.clone());
                 }
 
@@ -106,9 +114,11 @@ pub fn start_master_server() {
                 // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
                 for (name, elevator) in &mut worldview.elevators {
                     if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
+                        dbg!(duration);
                         let has_orders = requests_map[name].unwrap().iter().any(|v| v.hall_up || v.hall_down || v.cab);
 
-                        if has_orders && duration > Duration::from_secs(5) {
+                        if elevator.active && has_orders && duration > Duration::from_secs(5) {
+                            info!("Deaktiverer {name} :(");
                             elevator.active = false;
                             changed = true;
                         }
@@ -216,9 +226,6 @@ pub fn start_slave_client(
 
                 // Informer master om den nye tilstanden
                 send_state_to_maser(&client, worldview.clone(), local_elevator_state.clone());
-                worldview.set_local_elevator_state(local_elevator_state.clone());
-                client.send_channel().send(worldview.clone()).unwrap();
-
             },
             recv(client.receive_channel()) -> message => {
                 let (_, master_state) = message.unwrap();

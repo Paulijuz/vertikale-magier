@@ -1,15 +1,16 @@
+use crate::backup::{load_state_from_file, save_state_to_file};
 use crate::elevator_controller::{Direction, ElevatorEvent, ElevatorRequests, Request};
 use crate::elevator_controller::{State, NUMBER_OF_FLOORS};
 use crate::hall_request_assigner as hra;
 use crate::inputs;
+use crate::light_sync::sync_call_lights;
 use crate::network::advertiser::Advertiser;
 use crate::network::socket::{Client, Host};
-use crate::light_sync::sync_call_lights;
-use crate::backup::{load_state_from_file, save_state_to_file};
 
 use core::fmt;
 use crossbeam_channel as cbc;
 use crossbeam_channel::select;
+use crossbeam_channel::tick;
 use driver_rust::elevio;
 use driver_rust::elevio::elev::{CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info};
@@ -17,10 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::array;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
-use crossbeam_channel::tick;
 use std::time::{Duration, Instant, SystemTime};
-
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SingleElevatorState {
@@ -28,6 +26,7 @@ pub struct SingleElevatorState {
     pub direction: Direction,
     pub state: State,
     pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
+    pub active: bool,
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
 }
 
@@ -54,12 +53,13 @@ impl fmt::Display for SingleElevatorState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "Navn: {}\nTilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger: {:?}",
+            "Navn: {}\nTilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger: {:?} \nAktivitetsstatus: {:?}",
             self.name,
             self.state,
             self.direction,
             self.floor + 1,
-            self.cab_requests
+            self.cab_requests,
+            self.active,
         )
     }
 }
@@ -84,8 +84,8 @@ enum HallRequestState {
 pub struct HallRequest {
     up: HallRequestState,
     down: HallRequestState,
-    timestamp_assigned_request : Option<SystemTime>,
-    timestamp_dispatches_request : Option<SystemTime>,
+    timestamp_assigned_request_up: Option<SystemTime>,
+    timestamp_assigned_request_down: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,8 +120,6 @@ impl fmt::Display for AllElevatorStates {
     }
 }
 
-//endre til floor variabelen i vec^
-
 //udp for å finne master
 impl AllElevatorStates {
     pub fn new() -> Self {
@@ -130,26 +128,27 @@ impl AllElevatorStates {
             hall_requests: array::from_fn(|_| HallRequest {
                 up: HallRequestState::Inactive,
                 down: HallRequestState::Inactive,
-                timestamp_assigned_request: Some(SystemTime::now()),
-                timestamp_dispatches_request: Some(SystemTime::now()),
-
+                timestamp_assigned_request_up: Some(SystemTime::now()),
+                timestamp_assigned_request_down: Some(SystemTime::now()),
             }),
         }
     }
 
     // Velger beste heis for en bestilling
     pub fn assign_request(&mut self, floor: u8, direction: Direction) {
-        
-        let timestamp_assigned_request = SystemTime::now();
+        let timestamp_assigned_request_up = SystemTime::now();
+        let timestamp_assigned_request_down = SystemTime::now();
 
         match direction {
             Direction::Up => {
                 self.hall_requests[floor as usize].up = HallRequestState::Requested;
-                self.hall_requests[floor as usize].timestamp_assigned_request = Some(timestamp_assigned_request);
+                self.hall_requests[floor as usize].timestamp_assigned_request_up =
+                    Some(timestamp_assigned_request_up);
             }
             Direction::Down => {
                 self.hall_requests[floor as usize].down = HallRequestState::Requested;
-                self.hall_requests[floor as usize].timestamp_assigned_request = Some(timestamp_assigned_request);
+                self.hall_requests[floor as usize].timestamp_assigned_request_down =
+                    Some(timestamp_assigned_request_down);
             }
             _ => panic!("Tried to assign request with invalid direction"),
         }
@@ -163,6 +162,7 @@ impl AllElevatorStates {
         let states = self
             .elevators
             .iter()
+            .filter(|(_, v)| v.active)
             .map(|(k, v)| (k.to_owned(), v.into()))
             .collect();
 
@@ -206,13 +206,10 @@ impl AllElevatorStates {
     }
 }
 
-
-
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
 pub fn start_master_server() {
-
     let mut master_elevator_states = AllElevatorStates::new();
-    
+
     // Load state from backup if available
     if let Ok(state) = load_state_from_file("backup.json") {
         master_elevator_states = state;
@@ -226,9 +223,8 @@ pub fn start_master_server() {
     let advertiser = Advertiser::init(master.port());
     advertiser.start_advertising();
 
-    
     let mut slave_addresses: HashSet<SocketAddrV4> = HashSet::new();
-    
+
     let ticker = tick(Duration::from_millis(100));
 
     loop {
@@ -260,7 +256,7 @@ pub fn start_master_server() {
                         _ => {},
                     }
                 }
-                
+
                 // Informere alle slaver om nye bestillinger
                 for slave_address in &slave_addresses {
                     master.send_channel().send((*slave_address, master_elevator_states.to_owned())).unwrap();
@@ -273,15 +269,23 @@ pub fn start_master_server() {
                 let timestamp_start_master_server = SystemTime::now();
 
                 // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
-                for elevator in &master_elevator_states.hall_requests {
-                    if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_assigned_request.unwrap())
-                     {
-                        if duration < Duration::from_secs(5) {
-                            println!("Det har gått mindre enn 5 sekunder siden forespørselen ble tildelt.");
-                            break;
-                        } else {
-                            //se bort i fra heisen, kall på den funksjonen når implementert
-                            println!("Mer enn 5 sekunder har gått siden forespørselen ble tildelt.");
+                for requests in master_elevator_states.hall_requests.clone() {
+                    if let Ok(duration) = timestamp_start_master_server.duration_since(requests.timestamp_assigned_request_up.unwrap()) {
+                        if duration > Duration::from_secs(5){
+                            if let HallRequestState::Assigned(name) = &requests.up {
+                                master_elevator_states.elevators.get_mut(name).unwrap().active = false;
+                                let this_elevator = &master_elevator_states.elevators[name];
+                                master_elevator_states.assign_request(this_elevator.floor, Direction::Up);
+                            }
+                        }
+                    }
+                    if let Ok(duration) = timestamp_start_master_server.duration_since(requests.timestamp_assigned_request_down.unwrap()) {
+                        if duration > Duration::from_secs(5){
+                            if let HallRequestState::Assigned(name) = &requests.down {
+                                master_elevator_states.elevators.get_mut(name).unwrap().active = false;
+                                let this_elevator = &master_elevator_states.elevators[name];
+                                master_elevator_states.assign_request(this_elevator.floor, Direction::Down);
+                            }
                         }
                     }
                 }
@@ -291,12 +295,8 @@ pub fn start_master_server() {
             error!("klarte ikke lagre tilstanden: {}", e);
             info!("master_elevator_states er lagret i back-upen")
         }
-        
-
     }
-    
 }
-
 
 /// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
 pub fn start_slave_client(
@@ -325,11 +325,10 @@ pub fn start_slave_client(
         cab_requests: [false; 4],
         direction: Direction::Up,
         floor: 0,
+        active: true,
     };
 
     let mut all_elevator_states = AllElevatorStates::new();
-    
-
 
     loop {
         cbc::select! {
@@ -396,14 +395,15 @@ pub fn start_slave_client(
                 if let Some(requests) = all_elevator_states.get_requests_for_elevator(&name) {
                     elevator_command_tx.send(requests).unwrap();
                 }
-                
+
             },
         }
-        if let Err(e) = save_state_to_file(&all_elevator_states, "backup.json"){
-            error!("Klarte ikke sende den nye bestillingslista til heiskontrolleren i back-up: {}", e);
+        if let Err(e) = save_state_to_file(&all_elevator_states, "backup.json") {
+            error!(
+                "Klarte ikke sende den nye bestillingslista til heiskontrolleren i back-up: {}",
+                e
+            );
             info!("Sendt den nye bestillingslista til heiskontrolleren i back-up")
         }
     }
 }
-
-

@@ -1,3 +1,4 @@
+mod backup;
 mod elevator_controller;
 mod hall_request_assigner;
 mod inputs;
@@ -5,8 +6,8 @@ mod light_sync;
 mod network;
 mod request_dispatch;
 mod timer;
-mod backup;
 
+use crate::request_dispatch::{AllElevatorStates, SingleElevatorState};
 use backup::{load_state_from_file, save_state_to_file};
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
@@ -15,11 +16,8 @@ use env_logger;
 use log::{error, info, LevelFilter};
 use request_dispatch::{start_master_server, start_slave_client};
 use std::{env, thread::spawn};
-use crate::request_dispatch::{AllElevatorStates, SingleElevatorState};
-
 
 fn main() {
-
     env_logger::Builder::new()
         .filter_level(LevelFilter::Trace)
         .init();
@@ -46,6 +44,4 @@ fn main() {
     }
 
     error!("Programmet må startes som enten master eller slave. Kjør 'cargo run master' for master eller 'cargo run slave' for slave.");
-
-    
 }

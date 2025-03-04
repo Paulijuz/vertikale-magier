@@ -32,7 +32,7 @@ pub struct Request {
     pub cab: bool,
 }
 
-pub type  ElevatorRequests = [Request; NUMBER_OF_FLOORS];
+pub type ElevatorRequests = [Request; NUMBER_OF_FLOORS];
 
 pub struct ElevatorEvent {
     pub direction: Direction,

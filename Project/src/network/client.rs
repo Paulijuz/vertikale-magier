@@ -51,25 +51,25 @@ fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(Sock
         let data: std::result::Result<ReceiveType<T>, _> = serde_json::from_slice(&buffer[..count]);
 
         match data {
+            //Splitter mellom at det er data eller heartbeat
             Ok(ReceiveType::Data(data)) => {
                 receive_channel_tx.send((address, data)).unwrap();
             }
             Ok(ReceiveType::Heartbeat(heartbeat)) => {
                 println!("Received heartbeat");
-                // Check if this is the first heartbeat received since start
                 if last_received.is_none() {
                     println!("First heartbeat received since start");
                     last_received = Some(start_time);
                 } else {
                     last_received = Some(Instant::now());
                 }
-                // utfør heartbeat funksjon og sjekk om heis er i live.
+                // TODO utfør heartbeat funksjon og sjekk om heis er i live.
             }
             Err(E) => {
                 warn!("Could not deserialize received data!, {:?}", E);
             }
         }
-
+        //Midlertidig løsning for å sjekke om heisen er i live
         if let Some(last) = last_received {
             let elapsed = last.elapsed().as_millis();
             if elapsed > 500 {
@@ -80,11 +80,12 @@ fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(Sock
 }
 
 fn send<T: SendableType>(socket: Socket, send_channel_rx: Receiver<T>, send_address: SocketAddrV4) {
-    let ticker = tick(Duration::from_millis(1500));
+    let ticker = tick(Duration::from_millis(15));
     let start_time = std::time::Instant::now();
     loop {
         select! {
             recv(ticker) -> _ => {
+                // Sende heartbeat mellom klienter, omforme til JSON.
                 let receive_type: ReceiveType<T> = ReceiveType::Heartbeat("Heartbeat".to_string());
                 let Ok(buffer) = serde_json::to_vec(&receive_type) else {
                     panic!("Could not serialize heartbeat!");

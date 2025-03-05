@@ -1,5 +1,5 @@
-use crossbeam_channel::{self as cbc, tick};
 use crossbeam_channel::select;
+use crossbeam_channel::{self as cbc, tick};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info};
 use std::collections::{HashMap, HashSet};
@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::backup::{load_state_from_file, save_state_to_file};
 use crate::elevator::{
-    controller::{ElevatorEvent, Behaviour},
+    controller::{Behaviour, ElevatorEvent},
     inputs,
     lights::set_call_lights,
 };
@@ -122,10 +122,10 @@ pub fn start_master_server() {
                         }
                     }
                 }
-    
+
                 if changed {
                     worldview.assign_requests();
-                    
+
                     worldview.iteration += 1;
 
                     // Informere alle slaver om nye bestillinger

@@ -1,6 +1,6 @@
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, time::SystemTime};
+use std::{collections::HashMap, fmt, time::{Duration, SystemTime}};
 
 use crate::{
     elevator::controller::Behaviour,
@@ -50,7 +50,8 @@ impl fmt::Display for ElevatorState {
 
         writeln!(
             f,
-            "Aktiv: {}\nTilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger:\n  1 2 3 4\n  {}",
+            "Alder: {} s\nAktiv: {}\nTilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger:\n  1 2 3 4\n  {}",
+            SystemTime::now().duration_since(self.timestamp_last_event).unwrap_or(Duration::from_secs(52)).as_secs(),
             self.active,
             self.state,
             self.direction,

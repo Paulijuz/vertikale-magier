@@ -1,16 +1,10 @@
-use crossbeam_channel as cbc;
+use crossbeam_channel::{self as cbc, Receiver, Sender};
+use driver_rust::elevio::poll::CallButton;
 use driver_rust::elevio::{elev::Elevator, poll};
 use std::thread::spawn;
 use std::time::Duration;
 
 const POLL_PERIOD: Duration = Duration::from_millis(25);
-
-pub struct InputChannels {
-    pub call_button_rx: cbc::Receiver<poll::CallButton>,
-    pub floor_sensor_rx: cbc::Receiver<u8>,
-    pub stop_button_rx: cbc::Receiver<bool>,
-    pub obstruction_rx: cbc::Receiver<bool>,
-}
 
 /// Utility function for wrapping elevio "poll functions" with channels.
 /// Optionally an "inital function" can be passed which will be called
@@ -32,21 +26,30 @@ fn create_poll_channel<T: Send + 'static>(
     channel_rx
 }
 
-impl InputChannels {
-    pub fn new(elevator: &Elevator) -> Self {
-        Self {
-            call_button_rx: create_poll_channel(elevator, poll::call_buttons, None),
-            floor_sensor_rx: create_poll_channel(elevator, poll::floor_sensor, None),
-            obstruction_rx: create_poll_channel(
-                elevator,
-                poll::obstruction,
-                Some(Elevator::obstruction),
-            ),
-            stop_button_rx: create_poll_channel(
-                elevator,
-                poll::stop_button,
-                Some(Elevator::stop_button),
-            ),
-        }
-    }
+
+pub fn create_call_button_channel(elevio_driver: &Elevator) -> Receiver<CallButton> {
+    create_poll_channel(elevio_driver, poll::call_buttons, None)
 }
+
+
+
+pub fn create_floor_sensor_channel(elevio_driver: &Elevator) -> Receiver<u8> {
+    create_poll_channel(elevio_driver, poll::floor_sensor, None)
+}
+
+pub fn create_obstruction_channel(elevio_driver: &Elevator) -> Receiver<bool> {
+    create_poll_channel(
+        elevio_driver,
+        poll::obstruction,
+        Some(Elevator::obstruction),
+    )
+}
+
+pub fn create_stop_button_channel(elevio_driver: &Elevator) -> Receiver<bool> {
+    create_poll_channel(
+        elevio_driver,
+        poll::stop_button,
+        Some(Elevator::stop_button),
+    )
+}
+

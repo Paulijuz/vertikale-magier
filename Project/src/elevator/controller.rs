@@ -12,7 +12,7 @@ use crate::{
     timer::Timer,
 };
 
-use super::inputs;
+use super::inputs::{self, create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel};
 
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 
@@ -151,12 +151,14 @@ impl<'e> ElevatorController<'e> {
 }
 
 pub fn controller_loop(
-    elevio_elevator: &elevio::elev::Elevator,
+    elevio_driver: &elevio::elev::Elevator,
     command_channel_rx: cbc::Receiver<Requests>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
-    let input_channels = inputs::InputChannels::new(&elevio_elevator);
-    let mut controller = ElevatorController::new(&elevio_elevator);
+    let floor_sensor_channel = create_floor_sensor_channel(elevio_driver);
+    let obstruction_channel = create_obstruction_channel(elevio_driver);
+    let stop_button_channel = create_stop_button_channel(elevio_driver);
+    let mut controller = ElevatorController::new(elevio_driver);
 
     loop {
         cbc::select! {
@@ -189,11 +191,11 @@ pub fn controller_loop(
                     warn!("Doin fuck al")
                 }
             },
-            recv(input_channels.floor_sensor_rx) -> floor => {
+            recv(floor_sensor_channel) -> floor => {
                 let floor = floor.unwrap();
                 debug!("Detekterte etasje: {floor}");
 
-                elevio_elevator.floor_indicator(floor); // TODO: Bruk sync lights her kanskje?
+                elevio_driver.floor_indicator(floor); // TODO: Bruk sync lights her kanskje?
                 controller.last_floor = Some(floor);
 
                 if controller.behaviour != Behaviour::Moving {
@@ -210,7 +212,7 @@ pub fn controller_loop(
                     floor: controller.last_floor.unwrap(),
                 }).unwrap();
             },
-            recv(input_channels.stop_button_rx) -> stop_button => {
+            recv(stop_button_channel) -> stop_button => {
                 let stop_button = stop_button.unwrap();
                 debug!("Detekterte stopknapp: {:}", stop_button);
 
@@ -218,10 +220,10 @@ pub fn controller_loop(
                     continue;
                 }
 
-                elevio_elevator.motor_direction(elevio::elev::DIRN_STOP);
+                elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
                 controller.behaviour = Behaviour::OutOfOrder;
             },
-            recv(input_channels.obstruction_rx) -> obstruction_switch => {
+            recv(obstruction_channel) -> obstruction_switch => {
                 controller.obstruction = obstruction_switch.unwrap();
                 debug!("Detekterte obstruksjon: {:}", controller.obstruction);
             },
@@ -232,7 +234,7 @@ pub fn controller_loop(
                     continue;
                 }
 
-                elevio_elevator.door_light(false);
+                elevio_driver.door_light(false);
                 debug!("Dør lukket.");
 
                 let (next_direction, next_state) = controller.next_direction();

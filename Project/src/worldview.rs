@@ -50,7 +50,7 @@ impl fmt::Display for ElevatorState {
 
         writeln!(
             f,
-            "Aktiv: {}\n, Tilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger:\n  1 2 3 4\n  {}",
+            "Aktiv: {}\nTilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger:\n  1 2 3 4\n  {}",
             self.active,
             self.state,
             self.direction,
@@ -210,10 +210,28 @@ impl Worldview {
         self.elevators
             .insert(self.name.clone(), local_elevator_state.clone());
     }
+    pub fn local_elevator_state(&mut self) -> &mut ElevatorState {
+        if !self.elevators.contains_key(&self.name) {
+            self.elevators.insert(self.name.clone(), ElevatorState {
+                active: true,
+                cab_requests: Default::default(),
+                direction: Direction::Stopped,
+                floor: 0,
+                state: Behaviour::Idle,
+                timestamp_last_event: SystemTime::now(),
+            });
+        }
+
+        self.elevators.get_mut(&self.name).unwrap()
+    }
     pub fn sync_with_master(&mut self, master_state: Worldview) {
+        let local_elevator_state = self.local_elevator_state().to_owned();
+
         *self = Self {
             name: self.name.clone(),
             ..master_state
         };
+
+        self.elevators.insert(self.name.clone(), local_elevator_state);
     }
 }

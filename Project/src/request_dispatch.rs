@@ -61,7 +61,9 @@ pub fn run_dispatcher(
                     info!("Ny slave tilkoblet \"{}\"", slave_name);
                 }
 
-                worldview.elevators.insert(slave_name.clone(), slave_worldview.elevators[slave_name].clone());
+                let mut slave_elevator_state = slave_worldview.elevators[slave_name].clone();
+                slave_elevator_state.timestamp_last_event = SystemTime::now();
+                worldview.elevators.insert(slave_name.clone(), slave_elevator_state);
 
                 if slave_worldview.iteration - worldview.iteration == 1 {
                     // Ta imot nye og slett fullførte bestillinger

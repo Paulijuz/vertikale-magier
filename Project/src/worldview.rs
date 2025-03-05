@@ -175,7 +175,7 @@ impl Worldview {
         };
 
         for (name, assigned_hall_requests) in assignments.iter() {
-            for (floor, (up, down)) in assigned_hall_requests.iter().enumerate() {
+            for (floor, (up, down, _)) in assigned_hall_requests.iter().enumerate() {
                 if *up {
                     self.hall_requests[floor].up = HallRequestState::Assigned(name.to_string());
                 }

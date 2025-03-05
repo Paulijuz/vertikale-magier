@@ -14,6 +14,8 @@ use super::client::{Client, SendableType};
 const BACKLOG_SIZE: i32 = 128;
 const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+pub const ALL_CLIENTS: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
+
 pub struct Host<T: SendableType> {
     socket: Socket,
     send_channel: Option<Sender<(SocketAddrV4, T)>>,
@@ -57,10 +59,19 @@ fn serve_clients<T: SendableType>(
             },
             recv(send_channel_rx) -> message => {
                 let Ok((address, data)) = message else { break; };
+
+                if address == ALL_CLIENTS {
+                    for client in clients.values() {
+                        client.send_channel().send(data.clone()).unwrap();
+                    }
+                    continue;
+                }
+
                 let Some(client) = &clients.get(&address) else {
                     warn!("Warning: Tried sending to an unconnected address");
                     continue;
                 };
+
                 client.send_channel().send(data).unwrap();
             }
             recv(ticker) -> _ => {
@@ -88,10 +99,11 @@ impl<T: SendableType> Host<T> {
         let (send_channel_tx, send_channel_rx) = unbounded::<(SocketAddrV4, T)>();
 
         let accept_socket = socket.try_clone()?;
-        let accept_thread_handle =
-            spawn(move || accept_clients(accept_socket, new_client_channel_tx));
+        let accept_thread_handle: JoinHandle<()> = spawn(move || {
+            accept_clients(accept_socket, new_client_channel_tx);
+        });
         let serve_thread_handle = spawn(move || {
-            serve_clients(new_client_channel_rx, send_channel_rx, receive_channel_tx)
+            serve_clients(new_client_channel_rx, send_channel_rx, receive_channel_tx);
         });
 
         Ok(Host {

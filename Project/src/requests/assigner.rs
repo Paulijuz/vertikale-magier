@@ -1,3 +1,4 @@
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
 
@@ -43,7 +44,9 @@ pub struct HallRequestsStates {
     pub states: States,
 }
 
-pub type HallRequestsAssignments = HashMap<String, HallRequests>;
+pub type AllRequests = [(bool, bool, bool); NUMBER_OF_FLOORS];
+
+pub type HallRequestsAssignments = HashMap<String, AllRequests>;
 
 pub fn run_hall_request_assigner(
     input: HallRequestsStates,
@@ -61,7 +64,10 @@ pub fn run_hall_request_assigner(
 
         match assignments {
             Ok(assignments) => Ok(assignments),
-            Err(_) => Err(String::from("Invalid output from assigner.")),
+            Err(_) => Err(String::from(format!(
+                "Invalid output from assigner: {}",
+                String::from_utf8_lossy(&output.stdout)
+            ))),
         }
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())

@@ -1,52 +1,103 @@
-use super::{
-    advertiser::Advertiser, client::SendableType, Client, Host
-};
-use crossbeam_channel::{never, select};
-use log::{debug};
+use crate::network::host::ALL_CLIENTS;
+
+use super::{advertiser::Advertiser, client::SendableType, Client, Host};
+use crossbeam_channel::{never, select, unbounded, Receiver, Sender};
+use log::{debug, info, warn};
 use std::{
     net::SocketAddrV4,
     thread::{sleep, spawn, JoinHandle},
     time::Duration,
 };
 
+// Use 52 for group 52 <3
+const ADVERTISMENT_IP: [u8; 4] = [239, 0, 0, 52];
+const ADVERTISMENT_PORT: u16 = 52000;
+
 enum Role<T: SendableType> {
     Master(Host<T>),
     Slave(Client<T>),
 }
 
-pub struct Node {
-    thread: JoinHandle<()>,
+pub struct Node<T: SendableType> {
+    from_master_channel: Receiver<T>,
+    from_slave_channel: Receiver<T>,
+    to_master_channel: Sender<T>,
+    to_slaves_channel: Sender<T>,
+    thread: Option<JoinHandle<()>>,
 }
 
-impl Node {
-    pub fn init() -> Self {
-        let thread = spawn(move || run_node());
+impl<T: SendableType> Node<T> {
+    pub fn new() -> Self {
+        let (from_master_channel_tx, from_master_channel_rx) = unbounded::<T>();
+        let (from_slave_channel_tx, from_slave_channel_rx) = unbounded::<T>();
+        let (to_master_channel_tx, to_master_channel_rx) = unbounded::<T>();
+        let (to_slave_channel_tx, to_slave_channel_rx) = unbounded::<T>();
 
-        Node { thread }
+        let thread_handle = spawn(move || {
+            run_node(
+                from_master_channel_tx,
+                from_slave_channel_tx,
+                to_master_channel_rx,
+                to_slave_channel_rx,
+            )
+        });
+
+        Self {
+            from_master_channel: from_master_channel_rx,
+            from_slave_channel: from_slave_channel_rx,
+            to_slaves_channel: to_slave_channel_tx,
+            to_master_channel: to_master_channel_tx,
+            thread: Some(thread_handle),
+        }
     }
 
-    pub fn status_channel(&self) {}
+    pub fn to_master_channel(&self) -> &Sender<T> {
+        &self.to_master_channel
+    }
 
-    pub fn send_channel(&self) {}
+    pub fn to_slaves_channel(&self) -> &Sender<T> {
+        &self.to_slaves_channel
+    }
 
-    pub fn receive_channel(&self) {}
+    pub fn from_master_channel(&self) -> &Receiver<T> {
+        &self.from_master_channel
+    }
+
+    pub fn from_slave_channel(&self) -> &Receiver<T> {
+        &self.from_slave_channel
+    }
 }
 
-fn run_node() {
-    let host: Host<String> = Host::new_tcp_host(None);
+impl<T: SendableType> Drop for Node<T> {
+    fn drop(&mut self) {
+        self.thread.take().unwrap().join().unwrap();
+    }
+}
+
+fn run_node<T: SendableType>(
+    from_master_channel: Sender<T>,
+    from_slave_channel: Sender<T>,
+    to_master_channel: Receiver<T>,
+    to_slave_channel: Receiver<T>,
+) {
+    let host: Host<T> = Host::new_tcp_host(0).unwrap();
     let port = host.port();
 
-    let advertiser = Advertiser::new(port, [239, 0, 0, 52], 52052);
+    let advertiser = Advertiser::new(port, ADVERTISMENT_IP, ADVERTISMENT_PORT).unwrap();
     advertiser.start_advertising();
+
     let mut role = Role::Master(host);
 
+    info!("New node started as master.");
+
     loop {
-        let from_slaves_channel = match &role {
+        // If the node is a slave it doesn't have a host so we have to set its
+        // host receive channel to "never" and vice versa for when the node is a master.
+        let host_receive_channel = match &role {
             Role::Master(host) => host.receive_channel(),
             _ => &never(),
         };
-
-        let from_master_channel = match &role {
+        let client_receive_channel = match &role {
             Role::Slave(client) => client.receive_channel(),
             _ => &never(),
         };
@@ -59,39 +110,49 @@ fn run_node() {
 
                 match &role {
                     Role::Master(_) => {
-                        debug!("\nFound another master node: {master_address}");
+                        info!("\nFound another master node: {master_address}");
                         advertiser.stop_advertising();
 
                         debug!("Waiting to connect...");
+                        // Wait a random amount of time for arbitration.
+                        // The master with the shorter wait time wins!
                         sleep(Duration::from_millis(rand::random_range(0..=100)));
+                        // TODO: Find a better way to arbitrate masters.
 
                         if let Ok(client) = Client::new_tcp_client(address.ip().octets(), port) {
-                            debug!("Successfully connected!");
                             role = Role::Slave(client);
-                            debug!("Now slave.");
+                            info!("Successfully connected to master! Now slave.");
                             continue;
                         }
 
-                        debug!("Could not connect to master.");
+                        info!("Could not connect to master.");
                         advertiser.start_advertising();
                     },
                     _ => {},
                 }
             },
-            recv(from_slaves_channel) -> message => {
+            recv(host_receive_channel) -> message => {
                 debug!("\nData from slave recieved!");
 
-                let (address, data) = message.unwrap();
+                if matches!(role, Role::Slave(_)) {
+                    panic!("A slave should not be able to receive a message from another slave.")
+                }
 
-                debug!("Received data from slave ({address}): {data}");
+                let (_, data) = message.unwrap();
+
+                from_slave_channel.send(data).unwrap();
             },
-            recv(from_master_channel) -> message => {
+            recv(client_receive_channel) -> message => {
                 debug!("\nData from master recieved.");
 
-                let Ok((_, data)) = message else {
-                    debug!("Master dead!");
+                if matches!(role, Role::Master(_)) {
+                    panic!("A master should not be able to receive a message from another master.")
+                }
 
-                    let host = Host::new_tcp_host(None);
+                let Ok((_, data)) = message else {
+                    info!("Master is dead!");
+
+                    let host = Host::new_tcp_host(0).unwrap();
                     let port = host.port();
 
                     advertiser.set_advertisment(port);
@@ -99,12 +160,32 @@ fn run_node() {
 
                     role = Role::Master(host);
 
-                    debug!("Now master.");
+                    info!("Now master.");
                     continue;
                 };
 
-                debug!("Received data from master: {data}");
-            }
+                from_master_channel.send(data).unwrap();
+            },
+            recv(to_slave_channel) -> message => {
+                let message = message.unwrap();
+
+                match &role {
+                    Role::Master(host) => {
+                        from_master_channel.send(message.clone()).unwrap();
+                        host.send_channel().send((ALL_CLIENTS, message)).unwrap();
+                    },
+                    Role::Slave(_) => warn!("Tried sending to slaves while being a slave node."),
+                };
+            },
+            recv(to_master_channel) -> message => {
+                let message = message.unwrap();
+
+                // Send back to our selves if we are the master node.
+                match &role {
+                    Role::Master(_) => from_slave_channel.send(message).unwrap(),
+                    Role::Slave(client) => client.send_channel().send(message).unwrap(),
+                };
+            },
         }
     }
 }

@@ -1,78 +1,75 @@
-use crossbeam_channel::select;
 use crossbeam_channel::{self as cbc, tick};
+use crossbeam_channel::{select, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
-use log::{debug, error, info};
-use std::collections::{HashMap, HashSet};
-use std::net::SocketAddrV4;
+use log::{debug, error, info, warn};
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use crate::backup::{load_state_from_file, save_state_to_file};
-use crate::elevator::{
-    controller::{Behaviour, ElevatorEvent},
-    inputs,
-    lights::set_call_lights,
-};
-use crate::network::{advertiser::Advertiser, Client, Host};
+use crate::backup::save_state_to_file;
+use crate::elevator::inputs::create_call_button_channel;
+use crate::elevator::{controller::ElevatorEvent, lights::set_call_lights};
+use crate::network::node::Node;
 use crate::requests::requests::{Direction, Requests};
-use crate::worldview::{ElevatorState, HallRequestState, Worldview};
+use crate::worldview::{HallRequestState, Worldview};
 
-const MASTER_ADVERTISMENT_IP: [u8; 4] = [239, 0, 0, 52];
-const MASTER_ADVERTISMENT_PORT: u16 = 52052;
+pub fn send_state_to_maser(to_master: &Sender<Worldview>, mut worldview: Worldview) {
+    let local_elevator = worldview.local_elevator_state();
+    local_elevator.timestamp_last_event = SystemTime::now();
+    local_elevator.active = true;
+    worldview.iteration += 1;
+    to_master.send(worldview).unwrap();
+}
 
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
-pub fn start_master_server() {
-    // laster fra backup hvis mulig
-    let mut worldview = match load_state_from_file("backup.json") {
-        Ok(states) => {
-            info!("Loaded backup.");
-            states
-        }
-        Err(_) => {
-            info!("No backup found.");
-            Worldview::new(String::from("Master"))
-        }
-    };
-
-    let host = Host::<Worldview>::new_tcp_host(0).unwrap();
-    info!("Master lytter på port: {}", host.port());
-
-    // Start å informere slaver om at master eksisterer
-    let advertiser = Advertiser::new(
-        host.port(),
-        MASTER_ADVERTISMENT_IP,
-        MASTER_ADVERTISMENT_PORT,
-    )
-    .unwrap();
-    advertiser.start_advertising();
-
-    let mut slave_addresses: HashSet<SocketAddrV4> = HashSet::new();
-
+pub fn run_dispatcher(
+    inital_worldview: Worldview,
+    elevio_driver: &Elevator,
+    elevator_command_tx: cbc::Sender<Requests>,
+    elevator_event_rx: cbc::Receiver<ElevatorEvent>,
+) {
+    let mut worldview = inital_worldview;
     let ticker = tick(Duration::from_millis(1000));
+    let node = Node::<Worldview>::new();
+    let call_button_channel = create_call_button_channel(elevio_driver);
 
     loop {
         select! {
-            recv(host.receive_channel()) -> message => {
-                let (address, recieved_elevator_states) = message.unwrap();
-                let received_name = &recieved_elevator_states.name;
+            recv(node.from_master_channel()) -> message => {
+                let master_worldview = message.unwrap();
 
-                slave_addresses.insert(address);
+                info!("Received state from master:\n{worldview}");
 
-                info!("Master mottok melding fra \"{}\":\n{}", received_name, recieved_elevator_states);
+                worldview.sync_with_master(master_worldview);
 
-               // Legg til nye heiser
-                if let Some(elevator) = worldview.elevators.get(received_name) {
+                // Send den nye bestillingslista til heiskontrolleren og lyskontrolleren
+                let requests = worldview.requests_for_local_elevator();
+
+                set_call_lights(&elevio_driver, &requests);
+                elevator_command_tx.send(requests).unwrap();
+            },
+            recv(node.from_slave_channel()) -> message => {
+                let slave_worldview = message.unwrap();
+                let slave_name = &slave_worldview.name;
+
+                info!("Master mottok melding fra \"{slave_name}\":\n{slave_worldview}");
+
+                // Dersom vi har mottatt en melding fra en deaktivert slave kan vi
+                // anta at den er tilbake og aktivere den igjen
+                if let Some(elevator) = worldview.elevators.get(slave_name) {
                     if !elevator.active {
-                        info!("Aktiverer \"{}\" :)", received_name);
+                        info!("Aktiverer \"{}\" :)", slave_name);
                     }
                 } else {
-                    info!("Ny slave tilkoblet \"{}\"", received_name);
+                    info!("Ny slave tilkoblet \"{}\"", slave_name);
                 }
 
-                worldview.elevators.insert(recieved_elevator_states.name.clone(), recieved_elevator_states.elevators[received_name].clone());
+                let mut slave_elevator_state = slave_worldview.elevators[slave_name].clone();
+                slave_elevator_state.timestamp_last_event = SystemTime::now();
+                worldview.elevators.insert(slave_name.clone(), slave_elevator_state);
 
-                if recieved_elevator_states.iteration - worldview.iteration == 1 {
-                     // Ta imot nye og slett fullførte bestillinger
-                    for (floor, received_request) in recieved_elevator_states.hall_requests.iter().enumerate() {
+                if slave_worldview.iteration - worldview.iteration == 1 {
+                    // Ta imot nye og slett fullførte bestillinger
+                    for (floor, received_request) in slave_worldview.hall_requests.iter().enumerate() {
                         let master_request = worldview.hall_requests[floor].clone();
 
                         match (&received_request.up, &master_request.up) {
@@ -89,14 +86,13 @@ pub fn start_master_server() {
                     }
 
                     worldview.assign_requests();
+                } else {
+                    warn!("Mottok ugyldig verdenssyn.")
                 }
 
                 worldview.iteration += 1;
 
-                // Informere alle slaver om nye bestillinger
-                for slave_address in &slave_addresses {
-                    host.send_channel().send((*slave_address, worldview.to_owned())).unwrap();
-                }
+                node.to_slaves_channel().send(worldview.clone()).unwrap();
             },
             // Start å informere slaver om at master eksisterer
             recv(ticker) -> _message => {
@@ -129,67 +125,13 @@ pub fn start_master_server() {
                     worldview.iteration += 1;
 
                     // Informere alle slaver om nye bestillinger
-                    for slave_address in &slave_addresses {
-                        host.send_channel().send((*slave_address, worldview.to_owned())).unwrap();
-                    }
+                    node.to_slaves_channel().send(worldview.clone()).unwrap();
                 }
-            }
-        }
-
-        if let Err(e) = save_state_to_file(&worldview, "backup.json") {
-            error!("klarte ikke lagre backup: {e}");
-        }
-    }
-}
-
-pub fn send_state_to_master(
-    client: &Client<Worldview>,
-    mut system_state: Worldview,
-    mut local_elevator_state: ElevatorState,
-) {
-    local_elevator_state.timestamp_last_event = SystemTime::now();
-    system_state.set_local_elevator_state(local_elevator_state);
-    system_state.iteration += 1;
-    client.send_channel().send(system_state).unwrap();
-}
-
-/// Kobler opp til en master tjener. Sender bestillingsforespørsler og utfører mottatte bestillinger.
-pub fn start_slave_client(
-    name: Option<String>,
-    elevio_elevator: &Elevator,
-    elevator_command_tx: cbc::Sender<Requests>,
-    elevator_event_rx: cbc::Receiver<ElevatorEvent>,
-) {
-    let input_channels = inputs::InputChannels::new(elevio_elevator);
-
-    let advertiser = Advertiser::new(0, MASTER_ADVERTISMENT_IP, MASTER_ADVERTISMENT_PORT).unwrap();
-
-    info!("Leter etter en master...");
-    let (master_address, master_port) = advertiser.receive_channel().recv().unwrap();
-    info!("Fant en master: {master_address} {master_port}");
-
-    let client: Client<Worldview> =
-        Client::new_tcp_client(master_address.ip().octets(), master_port).unwrap();
-    info!("Koblet til master!");
-
-    // Bruk et tilfeldig dyr som id dersom navn ikke er spesifisert:)
-    let name = name.unwrap_or(petname::petname(1, "").unwrap());
-
-    let mut local_elevator_state = ElevatorState {
-        state: Behaviour::Idle,
-        cab_requests: [false; 4],
-        direction: Direction::Up,
-        floor: 0,
-        active: true,
-        timestamp_last_event: SystemTime::now(),
-    };
-
-    let mut worldview = Worldview::new(name);
-
-    loop {
-        cbc::select! {
+            },
             recv(elevator_event_rx) -> elevator_event => {
                 let elevator_event = elevator_event.unwrap();
+
+                let local_elevator_state = worldview.local_elevator_state();
 
                 // Oppdater tilstand til lokal heis
                 local_elevator_state.floor = elevator_event.floor;
@@ -213,9 +155,9 @@ pub fn start_slave_client(
                 elevator_command_tx.send(requests).unwrap();
 
                 // Informer master om den nye tilstanden
-                send_state_to_master(&client, worldview.clone(), local_elevator_state.clone());
+                send_state_to_maser(node.to_master_channel(), worldview.clone());
             },
-            recv(input_channels.call_button_rx) -> call_button => {
+            recv(call_button_channel) -> call_button => {
                 let call_button = call_button.unwrap();
 
                 let floor = call_button.floor as usize;
@@ -225,33 +167,17 @@ pub fn start_slave_client(
                 match call_button.call {
                     HALL_UP if hall_request.up == HallRequestState::Inactive => hall_request.up = HallRequestState::Requested,
                     HALL_DOWN if hall_request.down == HallRequestState::Inactive => hall_request.down = HallRequestState::Requested,
-                    CAB => local_elevator_state.cab_requests[floor] = true,
+                    CAB => worldview.local_elevator_state().cab_requests[floor] = true,
                     _ => {},
                 }
 
                 // Informer master om den nye tilstanden
-                send_state_to_master(&client, worldview.clone(), local_elevator_state.clone());
-            },
-            recv(client.receive_channel()) -> message => {
-                let (_, master_state) = message.unwrap();
-
-                worldview.sync_with_master(master_state);
-                worldview.set_local_elevator_state(local_elevator_state.clone());
-
-                info!("Received state from master:\n{worldview}");
-
-                // Send den nye bestillingslista til heiskontrolleren og lyskontrolleren
-                let requests = worldview.requests_for_local_elevator();
-                set_call_lights(&elevio_elevator, &requests);
-                elevator_command_tx.send(requests).unwrap();
+                send_state_to_maser(node.to_master_channel(), worldview.clone());
             },
         }
+
         if let Err(e) = save_state_to_file(&worldview, "backup.json") {
-            error!(
-                "Klarte ikke sende den nye bestillingslista til heiskontrolleren i back-up: {}",
-                e
-            );
-            info!("Sendt den nye bestillingslista til heiskontrolleren i back-up")
+            error!("Klarte ikke å lagre backup fil: {e}");
         }
     }
 }

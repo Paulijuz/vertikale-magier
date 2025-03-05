@@ -10,7 +10,7 @@ use std::{
 
 use super::client::{Client, SendableType};
 
-const ADVERTISING_INTERVAL: Duration = Duration::from_secs(1);
+const ADVERTISING_INTERVAL: Duration = Duration::from_millis(1000);
 const ADVERTISER_ID_LENGTH: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +26,7 @@ enum AdvertiserCommand<T> {
     Exit,
 }
 
-pub struct Advertiser<T: SendableType + Clone> {
+pub struct Advertiser<T: SendableType> {
     control_channel_tx: Sender<AdvertiserCommand<T>>,
     receive_channel_rx: Receiver<(SocketAddrV4, T)>,
     thread: Option<JoinHandle<()>>,
@@ -38,7 +38,7 @@ fn generate_sender_id() -> [u8; ADVERTISER_ID_LENGTH] {
     return buffer;
 }
 
-fn run_advertiser<T: SendableType + Clone>(
+fn run_advertiser<T: SendableType>(
     data: T,
     client: Client<Advertisment<T>>,
     control_channel_rx: Receiver<AdvertiserCommand<T>>,
@@ -82,7 +82,7 @@ fn run_advertiser<T: SendableType + Clone>(
     }
 }
 
-impl<T: SendableType + Clone> Advertiser<T> {
+impl<T: SendableType> Advertiser<T> {
     pub fn new(advertisment: T, multicast_ip: [u8; 4], port: u16) -> Result<Self> {
         let client: Client<Advertisment<T>> = Client::new_udp_multicast_client(multicast_ip, port)?;
 
@@ -123,7 +123,7 @@ impl<T: SendableType + Clone> Advertiser<T> {
     }
 }
 
-impl<T: SendableType + Clone> Drop for Advertiser<T> {
+impl<T: SendableType> Drop for Advertiser<T> {
     fn drop(&mut self) {
         self.control_channel_tx
             .send(AdvertiserCommand::Exit)

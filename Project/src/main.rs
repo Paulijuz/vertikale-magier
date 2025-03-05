@@ -1,11 +1,13 @@
+use backup::load_state_from_file;
 use clap::Parser;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
 use elevator::controller::controller_loop;
 use env_logger;
-use log::{error, info, LevelFilter};
-use request_dispatch::{start_master_server, start_slave_client};
+use log::{info, LevelFilter};
+use request_dispatch::run_dispatcher;
 use std::{process::exit, thread::spawn};
+use worldview::Worldview;
 
 mod backup;
 mod elevator;
@@ -37,29 +39,38 @@ fn main() {
 
     let args = Args::parse();
 
-    info!("Bruker port: {}", args.port);
+    let elevio_driver =
+        elevio::elev::Elevator::init(&format!("localhost:{}", args.port), 4).unwrap();
 
-    if args.master {
-        start_master_server();
-        return;
-    }
+    let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
 
-    if args.slave {
-        let elevio_driver =
-            elevio::elev::Elevator::init(&format!("localhost:{}", args.port), 4).unwrap();
-
-        let (command_channel_tx, command_channel_rx) = cbc::unbounded();
-        let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();
-
-        {
-            let elevio_driver = elevio_driver.clone();
-            spawn(move || controller_loop(&elevio_driver, command_channel_rx, elevator_event_tx));
+    // Load state from backup if available
+    let inital_worldview = match load_state_from_file("backupd.json") {
+        Ok(mut states) => {
+            info!("Loaded backup.");
+            states.name = name;
+            states
         }
+        Err(_) => {
+            info!("No backup found.");
+            Worldview::new(name)
+        }
+    };
 
-        start_slave_client(None, &elevio_driver, command_channel_tx, elevator_event_rx);
-        return;
+    let (command_channel_tx, command_channel_rx) = cbc::unbounded();
+    let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();
+
+    {
+        let elevio_driver = elevio_driver.clone();
+        spawn(move || controller_loop(&elevio_driver, command_channel_rx, elevator_event_tx));
     }
 
-    error!("Programmet må startes som enten master eller slave. Kjør 'cargo run -- --master' for master eller 'cargo run -- --slave' for slave.");
+    run_dispatcher(
+        inital_worldview,
+        &elevio_driver,
+        command_channel_tx,
+        elevator_event_rx,
+    );
+
     exit(1);
 }

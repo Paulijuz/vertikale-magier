@@ -19,4 +19,4 @@ The project consits of the following modules.
     - `assigner` - Our wrapper for ["hall_request_assigner"](https://github.com/TTK4145/Project-resources/tree/master/cost_fns/hall_request_assigner).
 - `request_dispatcher` - In essence the place where `network` meets `requests`. It takes in button presses, assigns requessts and distributes them among the elevators. 
 - `worldview` - Structs and corresponding functions to store and mutate a worldview of the system.
-- `main` - Is this counted as a module? In any case, it simply starts up the elevato
+- `main` - Is this counted as a module? In any case, it simply starts up the elevator controller and request dispatcher. In addition, it parses command line arguments for confugring port and node name.

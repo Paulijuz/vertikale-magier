@@ -21,7 +21,7 @@ const MASTER_ADVERTISMENT_PORT: u16 = 52052;
 
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
 pub fn start_master_server() {
-    // Load state from backup if available
+    // laster fra backup hvis mulig
     let mut worldview = match load_state_from_file("backup.json") {
         Ok(states) => {
             info!("Loaded backup.");
@@ -142,7 +142,7 @@ pub fn start_master_server() {
     }
 }
 
-pub fn send_state_to_maser(
+pub fn send_state_to_master(
     client: &Client<Worldview>,
     mut system_state: Worldview,
     mut local_elevator_state: ElevatorState,
@@ -213,7 +213,7 @@ pub fn start_slave_client(
                 elevator_command_tx.send(requests).unwrap();
 
                 // Informer master om den nye tilstanden
-                send_state_to_maser(&client, worldview.clone(), local_elevator_state.clone());
+                send_state_to_master(&client, worldview.clone(), local_elevator_state.clone());
             },
             recv(input_channels.call_button_rx) -> call_button => {
                 let call_button = call_button.unwrap();
@@ -230,7 +230,7 @@ pub fn start_slave_client(
                 }
 
                 // Informer master om den nye tilstanden
-                send_state_to_maser(&client, worldview.clone(), local_elevator_state.clone());
+                send_state_to_master(&client, worldview.clone(), local_elevator_state.clone());
             },
             recv(client.receive_channel()) -> message => {
                 let (_, master_state) = message.unwrap();

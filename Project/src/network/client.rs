@@ -1,14 +1,17 @@
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use log::warn;
-use serde::{de, Serialize};
+use serde::{de, Deserialize, Serialize};
 use socket2::{Domain, Protocol, Socket, Type};
+
 use std::{
     io::{ErrorKind, Read, Result},
     net::{Ipv4Addr, Shutdown, SocketAddrV4},
     thread::{spawn, JoinHandle},
+    time::{Duration, Instant},
 };
 
-const BUFFER_SIZE: usize = 4096;
+use crate::cbc::tick;
+const BUFFER_SIZE: usize = 1024;
 
 pub trait SendableType: Serialize + de::DeserializeOwned + Send + 'static {}
 impl<T: Serialize + de::DeserializeOwned + Send + 'static> SendableType for T {}
@@ -21,7 +24,16 @@ pub struct Client<T: SendableType> {
     receive_thread: Option<JoinHandle<()>>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ReceiveType<T> {
+    Data(T),
+    Heartbeat(String),
+}
+
 fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(SocketAddrV4, T)>) {
+    let start_time = std::time::Instant::now();
+    let mut last_received: Option<Instant> = None;
+
     loop {
         let mut buffer = [0; BUFFER_SIZE];
 
@@ -36,26 +48,63 @@ fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(Sock
         let address = address
             .as_socket_ipv4()
             .unwrap_or(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
-        let Ok(data) = serde_json::from_slice::<T>(&buffer[..count]) else {
-            warn!("Could not deserialize received data!");
-            continue;
-        };
+        let data: std::result::Result<ReceiveType<T>, _> = serde_json::from_slice(&buffer[..count]);
 
-        receive_channel_tx.send((address, data.into())).unwrap();
+        match data {
+            Ok(ReceiveType::Data(data)) => {
+                receive_channel_tx.send((address, data)).unwrap();
+            }
+            Ok(ReceiveType::Heartbeat(heartbeat)) => {
+                println!("Received heartbeat");
+                // Check if this is the first heartbeat received since start
+                if last_received.is_none() {
+                    println!("First heartbeat received since start");
+                    last_received = Some(start_time);
+                } else {
+                    last_received = Some(Instant::now());
+                }
+                // utfør heartbeat funksjon og sjekk om heis er i live.
+            }
+            Err(E) => {
+                warn!("Could not deserialize received data!, {:?}", E);
+            }
+        }
+
+        if let Some(last) = last_received {
+            let elapsed = last.elapsed().as_millis();
+            if elapsed > 500 {
+                println!("No heartbeats received for {} ms, it's dead", elapsed);
+            }
+        }
     }
 }
 
 fn send<T: SendableType>(socket: Socket, send_channel_rx: Receiver<T>, send_address: SocketAddrV4) {
+    let ticker = tick(Duration::from_millis(1500));
+    let start_time = std::time::Instant::now();
     loop {
-        let Ok(data) = send_channel_rx.recv() else {
-            break;
-        };
+        select! {
+            recv(ticker) -> _ => {
+                let receive_type: ReceiveType<T> = ReceiveType::Heartbeat("Heartbeat".to_string());
+                let Ok(buffer) = serde_json::to_vec(&receive_type) else {
+                    panic!("Could not serialize heartbeat!");
+                };
+                socket.send_to(&buffer, &send_address.into()).unwrap();
+            }
 
-        let Ok(buffer) = serde_json::to_vec(&data) else {
-            panic!("Could not serialize data!");
-        };
+            recv(send_channel_rx) -> data => {
+                let Ok(data) = data else {
+                    break;
+                };
+                let receive_type = ReceiveType::Data(data);
+                let Ok(buffer) = serde_json::to_vec(&receive_type) else {
+                    panic!("Could not serialize data!");
+                };
+                socket.send_to(&buffer, &send_address.into()).unwrap();
 
-        socket.send_to(&buffer, &send_address.into()).unwrap();
+                
+            }
+        }
     }
 }
 

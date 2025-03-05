@@ -141,7 +141,9 @@ impl Worldview {
     pub fn add_request(&mut self, floor: u8, direction: Direction) {
         match direction {
             Direction::Up => self.hall_requests[floor as usize].up = HallRequestState::Requested,
-            Direction::Down => self.hall_requests[floor as usize].down = HallRequestState::Requested,
+            Direction::Down => {
+                self.hall_requests[floor as usize].down = HallRequestState::Requested
+            }
             _ => panic!("Tried to assign request with invalid direction"),
         }
     }

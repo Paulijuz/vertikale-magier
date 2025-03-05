@@ -12,8 +12,8 @@ mod elevator;
 mod network;
 mod request_dispatch;
 mod requests;
-mod worldview;
 mod timer;
+mod worldview;
 
 #[derive(Debug, Parser)]
 struct Args {

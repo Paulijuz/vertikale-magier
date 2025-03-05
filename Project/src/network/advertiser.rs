@@ -9,7 +9,6 @@ use std::{
 };
 
 use super::client::{Client, SendableType};
-use crate::network::elevator_monitor::ElevatorMonitor;
 
 const ADVERTISING_INTERVAL: Duration = Duration::from_secs(1);
 const ADVERTISER_ID_LENGTH: usize = 16;
@@ -52,7 +51,6 @@ fn run_advertiser<T: SendableType + Clone>(
     let mut is_advertising = false;
 
     let ticker = tick(ADVERTISING_INTERVAL);
-    let elevator_monitor = ElevatorMonitor::new();
 
     loop {
         select! {
@@ -79,7 +77,6 @@ fn run_advertiser<T: SendableType + Clone>(
                 }
 
                 receive_channel_tx.send((address, received_advertisment.data)).unwrap();
-                elevator_monitor.send_heartbeat(received_advertisment.sender_id);
             },
         }
     }

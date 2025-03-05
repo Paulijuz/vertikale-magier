@@ -4,16 +4,21 @@ use driver_rust::elevio;
 use elevator::controller::controller_loop;
 use env_logger;
 use log::{error, info, LevelFilter};
+use network::node::Node;
 use request_dispatch::{start_master_server, start_slave_client};
-use std::{process::exit, thread::spawn};
+use std::{
+    process::exit,
+    thread::{sleep, spawn},
+    time::Duration,
+};
 
 mod backup;
 mod elevator;
 mod network;
 mod request_dispatch;
 mod requests;
-mod worldview;
 mod timer;
+mod worldview;
 
 #[derive(Debug, Parser)]
 struct Args {

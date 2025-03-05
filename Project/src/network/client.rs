@@ -10,8 +10,9 @@ use std::{
 
 const BUFFER_SIZE: usize = 4096;
 
-pub trait SendableType: Serialize + de::DeserializeOwned + Send + 'static {}
-impl<T: Serialize + de::DeserializeOwned + Send + 'static> SendableType for T {}
+// Define an empty trait to use as an alias for all of the traits below
+pub trait SendableType: Serialize + de::DeserializeOwned + Clone + Send + 'static {}
+impl<T: Serialize + de::DeserializeOwned + Clone + Send + 'static> SendableType for T {}
 
 pub struct Client<T: SendableType> {
     socket: Socket,

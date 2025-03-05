@@ -12,7 +12,9 @@ use crate::{
     timer::Timer,
 };
 
-use super::inputs::{self, create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel};
+use super::inputs::{
+    self, create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel,
+};
 
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 

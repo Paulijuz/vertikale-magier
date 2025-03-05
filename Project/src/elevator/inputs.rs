@@ -26,12 +26,9 @@ fn create_poll_channel<T: Send + 'static>(
     channel_rx
 }
 
-
 pub fn create_call_button_channel(elevio_driver: &Elevator) -> Receiver<CallButton> {
     create_poll_channel(elevio_driver, poll::call_buttons, None)
 }
-
-
 
 pub fn create_floor_sensor_channel(elevio_driver: &Elevator) -> Receiver<u8> {
     create_poll_channel(elevio_driver, poll::floor_sensor, None)
@@ -52,4 +49,3 @@ pub fn create_stop_button_channel(elevio_driver: &Elevator) -> Receiver<bool> {
         Some(Elevator::stop_button),
     )
 }
-

@@ -6,11 +6,8 @@ use elevator::controller::controller_loop;
 use env_logger;
 use log::{info, LevelFilter};
 use request_dispatch::run_dispatcher;
+use std::{process::exit, thread::spawn};
 use worldview::Worldview;
-use std::{
-    process::exit,
-    thread::spawn,
-};
 
 mod backup;
 mod elevator;
@@ -42,7 +39,8 @@ fn main() {
 
     let args = Args::parse();
 
-    let elevio_driver = elevio::elev::Elevator::init(&format!("localhost:{}", args.port), 4).unwrap();
+    let elevio_driver =
+        elevio::elev::Elevator::init(&format!("localhost:{}", args.port), 4).unwrap();
 
     let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
 
@@ -66,7 +64,12 @@ fn main() {
         spawn(move || controller_loop(&elevio_driver, command_channel_rx, elevator_event_tx));
     }
 
-    run_dispatcher(inital_worldview, &elevio_driver, command_channel_tx, elevator_event_rx);
+    run_dispatcher(
+        inital_worldview,
+        &elevio_driver,
+        command_channel_tx,
+        elevator_event_rx,
+    );
 
     exit(1);
 }

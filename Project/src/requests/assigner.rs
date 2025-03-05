@@ -1,3 +1,4 @@
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
 

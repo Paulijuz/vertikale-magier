@@ -1,4 +1,4 @@
-use log::warn;
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, time::SystemTime};
 
@@ -163,12 +163,15 @@ impl Worldview {
             .map(|(k, v)| (k.to_owned(), v.into()))
             .collect();
 
-        let Ok(assignments) = assigner::run_hall_request_assigner(assigner::HallRequestsStates {
+        let assignments = match assigner::run_hall_request_assigner(assigner::HallRequestsStates {
             hall_requests,
             states,
-        }) else {
-            warn!("Could not assign requests.");
-            return;
+        }) {
+            Ok(assignments) => assignments,
+            Err(message) => {
+                error!("Could not assign requests: {message}");
+                return;
+            }
         };
 
         for (name, assigned_hall_requests) in assignments.iter() {
@@ -212,14 +215,17 @@ impl Worldview {
     }
     pub fn local_elevator_state(&mut self) -> &mut ElevatorState {
         if !self.elevators.contains_key(&self.name) {
-            self.elevators.insert(self.name.clone(), ElevatorState {
-                active: true,
-                cab_requests: Default::default(),
-                direction: Direction::Stopped,
-                floor: 0,
-                state: Behaviour::Idle,
-                timestamp_last_event: SystemTime::now(),
-            });
+            self.elevators.insert(
+                self.name.clone(),
+                ElevatorState {
+                    active: true,
+                    cab_requests: Default::default(),
+                    direction: Direction::Stopped,
+                    floor: 0,
+                    state: Behaviour::Idle,
+                    timestamp_last_event: SystemTime::now(),
+                },
+            );
         }
 
         self.elevators.get_mut(&self.name).unwrap()
@@ -232,6 +238,7 @@ impl Worldview {
             ..master_state
         };
 
-        self.elevators.insert(self.name.clone(), local_elevator_state);
+        self.elevators
+            .insert(self.name.clone(), local_elevator_state);
     }
 }

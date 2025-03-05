@@ -1,5 +1,5 @@
-use crossbeam_channel::{select, Sender};
 use crossbeam_channel::{self as cbc, tick};
+use crossbeam_channel::{select, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
@@ -7,23 +7,16 @@ use std::time::{Duration, SystemTime};
 
 use crate::backup::save_state_to_file;
 use crate::elevator::inputs::create_call_button_channel;
-use crate::elevator::{
-    controller::ElevatorEvent,
-    lights::set_call_lights,
-};
+use crate::elevator::{controller::ElevatorEvent, lights::set_call_lights};
 use crate::network::node::Node;
 use crate::requests::requests::{Direction, Requests};
 use crate::worldview::{HallRequestState, Worldview};
 
-pub fn send_state_to_maser(
-    to_master: &Sender<Worldview>,
-    mut worldview: Worldview,
-) {
+pub fn send_state_to_maser(to_master: &Sender<Worldview>, mut worldview: Worldview) {
     worldview.local_elevator_state().timestamp_last_event = SystemTime::now();
     worldview.iteration += 1;
     to_master.send(worldview).unwrap();
 }
-
 
 /// Starter TCP-server for Master og fordeler innkommende bestillinger
 pub fn run_dispatcher(
@@ -36,19 +29,19 @@ pub fn run_dispatcher(
     let ticker = tick(Duration::from_millis(1000));
     let node = Node::<Worldview>::new();
     let call_button_channel = create_call_button_channel(elevio_driver);
-    
+
     loop {
         select! {
             recv(node.from_master_channel()) -> message => {
                 let master_worldview = message.unwrap();
-                
+
                 info!("Received state from master:\n{worldview}");
-        
+
                 worldview.sync_with_master(master_worldview);
-        
+
                 // Send den nye bestillingslista til heiskontrolleren og lyskontrolleren
                 let requests = worldview.requests_for_local_elevator();
-                
+
                 set_call_lights(&elevio_driver, &requests);
                 elevator_command_tx.send(requests).unwrap();
             },

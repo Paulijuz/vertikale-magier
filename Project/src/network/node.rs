@@ -170,7 +170,10 @@ fn run_node<T: SendableType>(
                 let message = message.unwrap();
 
                 match &role {
-                    Role::Master(host) => host.send_channel().send((ALL_CLIENTS, message)).unwrap(),
+                    Role::Master(host) => {
+                        from_slave_channel.send(message.clone()).unwrap();
+                        host.send_channel().send((ALL_CLIENTS, message)).unwrap();
+                    },
                     Role::Slave(_) => warn!("Tried sending to slaves while being a slave node."),
                 };
             },

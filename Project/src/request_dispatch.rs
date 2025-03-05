@@ -13,7 +13,9 @@ use crate::requests::requests::{Direction, Requests};
 use crate::worldview::{HallRequestState, Worldview};
 
 pub fn send_state_to_maser(to_master: &Sender<Worldview>, mut worldview: Worldview) {
-    worldview.local_elevator_state().timestamp_last_event = SystemTime::now();
+    let local_elevator = worldview.local_elevator_state();
+    local_elevator.timestamp_last_event = SystemTime::now();
+    local_elevator.active = true;
     worldview.iteration += 1;
     to_master.send(worldview).unwrap();
 }

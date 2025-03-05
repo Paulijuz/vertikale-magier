@@ -171,7 +171,7 @@ fn run_node<T: SendableType>(
 
                 match &role {
                     Role::Master(host) => {
-                        from_slave_channel.send(message.clone()).unwrap();
+                        from_master_channel.send(message.clone()).unwrap();
                         host.send_channel().send((ALL_CLIENTS, message)).unwrap();
                     },
                     Role::Slave(_) => warn!("Tried sending to slaves while being a slave node."),
@@ -182,7 +182,7 @@ fn run_node<T: SendableType>(
 
                 // Send back to our selves if we are the master node.
                 match &role {
-                    Role::Master(_) => from_master_channel.send(message).unwrap(),
+                    Role::Master(_) => from_slave_channel.send(message).unwrap(),
                     Role::Slave(client) => client.send_channel().send(message).unwrap(),
                 };
             },

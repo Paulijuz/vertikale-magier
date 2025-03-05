@@ -125,7 +125,7 @@ pub fn run_dispatcher(
                     worldview.iteration += 1;
 
                     // Informere alle slaver om nye bestillinger
-                    node.to_master_channel().send(worldview.clone()).unwrap();
+                    node.to_slaves_channel().send(worldview.clone()).unwrap();
                 }
             },
             recv(elevator_event_rx) -> elevator_event => {

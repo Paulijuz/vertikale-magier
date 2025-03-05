@@ -136,7 +136,7 @@ pub fn run_dispatcher(
                 // Oppdater tilstand til lokal heis
                 local_elevator_state.floor = elevator_event.floor;
                 local_elevator_state.direction = elevator_event.direction;
-                local_elevator_state.state = elevator_event.state;
+                local_elevator_state.behaviour = elevator_event.state;
 
                 // Marker ordre i etasje som fullførte
                 local_elevator_state.cab_requests[elevator_event.floor as usize] = false;

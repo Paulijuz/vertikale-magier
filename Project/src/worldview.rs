@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ElevatorState {
     pub direction: Direction,
-    pub state: Behaviour,
+    pub behaviour: Behaviour,
     pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
     pub active: bool,
@@ -23,7 +23,7 @@ pub struct ElevatorState {
 impl From<&ElevatorState> for assigner::State {
     fn from(single_elevator_state: &ElevatorState) -> Self {
         assigner::State {
-            behaviour: match single_elevator_state.state {
+            behaviour: match single_elevator_state.behaviour {
                 Behaviour::DoorOpen => assigner::Behaviour::DoorOpen,
                 Behaviour::Moving => assigner::Behaviour::Moving,
                 _ => assigner::Behaviour::Idle,
@@ -48,12 +48,17 @@ impl fmt::Display for ElevatorState {
             .collect::<Vec<_>>()
             .join(" ");
 
+        let age = match SystemTime::now().duration_since(self.timestamp_last_event) {
+            Ok(age) => age.as_secs().to_string(),
+            Err(_) => String::from("Fra fremtiden"),
+        };
+
         writeln!(
             f,
             "Alder: {} s\nAktiv: {}\nTilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger:\n  1 2 3 4\n  {}",
-            SystemTime::now().duration_since(self.timestamp_last_event).unwrap_or(Duration::from_secs(52)).as_secs(),
+            age,
             self.active,
-            self.state,
+            self.behaviour,
             self.direction,
             self.floor + 1,
             cab_requests_string,
@@ -223,7 +228,7 @@ impl Worldview {
                     cab_requests: Default::default(),
                     direction: Direction::Stopped,
                     floor: 0,
-                    state: Behaviour::Idle,
+                    behaviour: Behaviour::Idle,
                     timestamp_last_event: SystemTime::now(),
                 },
             );

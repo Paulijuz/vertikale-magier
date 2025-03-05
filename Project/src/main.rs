@@ -46,8 +46,9 @@ fn main() {
 
     // Load state from backup if available
     let inital_worldview = match load_state_from_file("backupd.json") {
-        Ok(states) => {
+        Ok(mut states) => {
             info!("Loaded backup.");
+            states.name = name;
             states
         }
         Err(_) => {

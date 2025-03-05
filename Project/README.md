@@ -1,7 +1,7 @@
 # Welcome
-Welcome to the amazing elevator "vertikale-magier" of group 52!
+Welcome to group 52's amazing elevator "vertikale-magier"!
 
-This is infamours elevator project for the coure TTK4145 Real-time Programming at NTNU. The task is to reliably control three elevators in a distributed system.
+This is the infamours elevator project for the coure [TTK4145 Real-time Programming](https://www.ntnu.edu/studies/courses/TTK4145) at NTNU. The task is to reliably control three elevators in a distributed system.
 
 # Outline
 The project consits of the following modules.

@@ -189,8 +189,6 @@ pub fn controller_loop(
                         state: controller.behaviour,
                         floor: controller.last_floor.unwrap(),
                     }).unwrap();
-                } else {
-                    warn!("Doin fuck al")
                 }
             },
             recv(floor_sensor_channel) -> floor => {

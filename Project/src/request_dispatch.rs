@@ -95,7 +95,7 @@ pub fn run_dispatcher(
                 node.to_slaves_channel().send(worldview.clone()).unwrap();
             },
             // Start å informere slaver om at master eksisterer
-            recv(ticker) -> _message => {
+            recv(ticker) -> _ => {
                 // Hent nåværende tidspunkt
                 let timestamp_start_master_server = SystemTime::now();
                 let mut changed = false;

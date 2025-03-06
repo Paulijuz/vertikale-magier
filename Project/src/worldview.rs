@@ -1,6 +1,6 @@
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, time::{Duration, SystemTime}};
+use std::{collections::HashMap, fmt, time::SystemTime};
 
 use crate::{
     elevator::controller::Behaviour,

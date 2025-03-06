@@ -28,7 +28,7 @@ pub struct Client<T: SendableType> {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ReceiveType<T> {
     Data(T),
-    Heartbeat(String),
+    Heartbeat,
 }
 
 fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(SocketAddrV4, T)>) {
@@ -49,14 +49,13 @@ fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(Sock
         let address = address
             .as_socket_ipv4()
             .unwrap_or(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
-        let data: std::result::Result<ReceiveType<T>, _> = serde_json::from_slice(&buffer[..count]);
 
-        match data {
+        match serde_json::from_slice(&buffer[..count]) {
             //Splitter mellom at det er data eller heartbeat
             Ok(ReceiveType::Data(data)) => {
                 receive_channel_tx.send((address, data)).unwrap();
             }
-            Ok(ReceiveType::Heartbeat(heartbeat)) => {
+            Ok(ReceiveType::Heartbeat) => {
                 println!("Received heartbeat");
                 if last_received.is_none() {
                     println!("First heartbeat received since start");
@@ -66,8 +65,8 @@ fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(Sock
                 }
                 // TODO utfør heartbeat funksjon og sjekk om heis er i live.
             }
-            Err(E) => {
-                warn!("Could not deserialize received data!, {:?}", E);
+            Err(error) => {
+                warn!("Could not deserialize received data!, {:?}", error);
             }
         }
         //Midlertidig løsning for å sjekke om heisen er i live
@@ -82,12 +81,12 @@ fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(Sock
 
 fn send<T: SendableType>(socket: Socket, send_channel_rx: Receiver<T>, send_address: SocketAddrV4) {
     let ticker = tick(Duration::from_millis(15));
-    let start_time = std::time::Instant::now();
+
     loop {
         select! {
             recv(ticker) -> _ => {
                 // Sende heartbeat mellom klienter, omforme til JSON.
-                let receive_type: ReceiveType<T> = ReceiveType::Heartbeat("Heartbeat".to_string());
+                let receive_type: ReceiveType<T> = ReceiveType::Heartbeat;
                 let Ok(buffer) = serde_json::to_vec(&receive_type) else {
                     panic!("Could not serialize heartbeat!");
                 };
@@ -103,8 +102,6 @@ fn send<T: SendableType>(socket: Socket, send_channel_rx: Receiver<T>, send_addr
                     panic!("Could not serialize data!");
                 };
                 socket.send_to(&buffer, &send_address.into()).unwrap();
-
-                
             }
         }
     }

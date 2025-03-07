@@ -14,7 +14,7 @@ use crate::{
 pub struct ElevatorState {
     pub direction: Direction,
     pub behaviour: Behaviour,
-    pub floor: u8, // TOOD: Denne typen kan vel egentlig være usize?
+    pub floor: usize, // TOOD: Denne typen kan vel egentlig være usize?
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
     pub active: bool,
     pub timestamp_last_event: SystemTime,
@@ -144,11 +144,11 @@ impl Worldview {
             ..Default::default()
         }
     }
-    pub fn add_request(&mut self, floor: u8, direction: Direction) {
+    pub fn add_request(&mut self, floor: usize, direction: Direction) {
         match direction {
-            Direction::Up => self.hall_requests[floor as usize].up = HallRequestState::Requested,
+            Direction::Up => self.hall_requests[floor].up = HallRequestState::Requested,
             Direction::Down => {
-                self.hall_requests[floor as usize].down = HallRequestState::Requested
+                self.hall_requests[floor].down = HallRequestState::Requested
             }
             _ => panic!("Tried to assign request with invalid direction"),
         }

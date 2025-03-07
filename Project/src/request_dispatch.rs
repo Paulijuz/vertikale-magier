@@ -73,13 +73,13 @@ pub fn run_dispatcher(
                         let master_request = worldview.hall_requests[floor].clone();
 
                         match (&received_request.up, &master_request.up) {
-                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.add_request(floor as u8, Direction::Up),
+                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.add_request(floor, Direction::Up),
                             (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.hall_requests[floor].up = HallRequestState::Inactive,
                             _ => {},
                         }
 
                         match (&received_request.down, &master_request.down) {
-                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.add_request(floor as u8, Direction::Down),
+                            (HallRequestState::Requested, HallRequestState::Inactive) => worldview.add_request(floor, Direction::Down),
                             (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.hall_requests[floor].down = HallRequestState::Inactive,
                             _ => {},
                         }
@@ -139,15 +139,15 @@ pub fn run_dispatcher(
                 local_elevator_state.behaviour = elevator_event.state;
 
                 // Marker ordre i etasje som fullførte
-                local_elevator_state.cab_requests[elevator_event.floor as usize] = false;
+                local_elevator_state.cab_requests[elevator_event.floor] = false;
 
                 if elevator_event.direction != Direction::Down {
                     debug!("Cleared up.");
-                    worldview.hall_requests[elevator_event.floor as usize].up = HallRequestState::Inactive;
+                    worldview.hall_requests[elevator_event.floor].up = HallRequestState::Inactive;
                 }
                 if elevator_event.direction != Direction::Up {
                     debug!("Cleared down.");
-                    worldview.hall_requests[elevator_event.floor as usize].down = HallRequestState::Inactive;
+                    worldview.hall_requests[elevator_event.floor].down = HallRequestState::Inactive;
                 }
 
                 // Send den oppdaterte ordrelisten til heiskontrolleren

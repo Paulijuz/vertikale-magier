@@ -1,4 +1,3 @@
-use log::error;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
 
@@ -27,7 +26,7 @@ pub enum Direction {
 #[derive(Serialize, Deserialize)]
 pub struct State {
     pub behaviour: Behaviour,
-    pub floor: u8,
+    pub floor: usize,
     pub direction: Direction,
     #[serde(rename = "cabRequests")]
     pub cab_requests: [bool; NUMBER_OF_FLOORS],

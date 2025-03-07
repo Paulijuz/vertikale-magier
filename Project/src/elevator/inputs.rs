@@ -1,4 +1,4 @@
-use crossbeam_channel::{self as cbc, Receiver, Sender};
+use crossbeam_channel::{self as cbc, Receiver};
 use driver_rust::elevio::poll::CallButton;
 use driver_rust::elevio::{elev::Elevator, poll};
 use std::thread::spawn;

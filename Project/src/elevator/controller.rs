@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
-use log::{debug, warn};
+use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -12,9 +12,7 @@ use crate::{
     timer::Timer,
 };
 
-use super::inputs::{
-    self, create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel,
-};
+use super::inputs::{create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel};
 
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 
@@ -29,7 +27,7 @@ pub enum Behaviour {
 pub struct ElevatorEvent {
     pub direction: Direction,
     pub state: Behaviour,
-    pub floor: u8,
+    pub floor: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -39,7 +37,7 @@ struct ElevatorController<'e> {
     behaviour: Behaviour,
     direction: Direction,
     obstruction: bool,
-    last_floor: Option<u8>,
+    last_floor: Option<usize>,
     requests: Requests,
 }
 
@@ -59,7 +57,7 @@ impl<'e> ElevatorController<'e> {
     fn next_direction(&self) -> (Direction, Behaviour) {
         let floor = self
             .last_floor
-            .expect("Called next direction without known floor.") as usize;
+            .expect("Called next direction without known floor.");
 
         match self.direction {
             Direction::Up => {
@@ -104,7 +102,7 @@ impl<'e> ElevatorController<'e> {
     fn should_stop(&self) -> bool {
         let floor = self
             .last_floor
-            .expect("Called next direction without known floor.") as usize;
+            .expect("Called next direction without known floor.");
 
         match self.direction {
             Direction::Down => {
@@ -196,7 +194,7 @@ pub fn controller_loop(
                 debug!("Detekterte etasje: {floor}");
 
                 elevio_driver.floor_indicator(floor); // TODO: Bruk sync lights her kanskje?
-                controller.last_floor = Some(floor);
+                controller.last_floor = Some(floor as usize);
 
                 if controller.behaviour != Behaviour::Moving {
                     continue;

@@ -1,5 +1,5 @@
 use crossbeam_channel::{select, tick, unbounded, Receiver, Sender};
-use log::warn;
+use log::{debug, warn};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     collections::HashMap,
@@ -61,18 +61,25 @@ fn serve_clients<T: SendableType>(
                 let Ok((address, data)) = message else { break; };
 
                 if address == ALL_CLIENTS {
-                    for client in clients.values() {
-                        client.send_channel().send(data.clone()).unwrap();
-                    }
+                    clients.retain(|_, client| {
+                        let success = client.send_channel().send(data.clone()).is_ok();
+                        if !success {
+                            warn!("Tried sending to a disconnected client.");
+                        }
+                        success
+                    });
                     continue;
                 }
 
                 let Some(client) = &clients.get(&address) else {
-                    warn!("Warning: Tried sending to an unconnected address");
+                    warn!("Tried sending to an unknown address.");
                     continue;
                 };
 
-                client.send_channel().send(data).unwrap();
+                if client.send_channel().send(data).is_err() {
+                    warn!("Tried sending to a disconnected client.");
+                    clients.remove(&address);
+                }
             }
             recv(ticker) -> _ => {
                 for (address, client) in &clients {
@@ -134,10 +141,12 @@ impl<T: SendableType> Host<T> {
 
 impl<T: SendableType> Drop for Host<T> {
     fn drop(&mut self) {
+        debug!("Shutting down host...");
         self.socket.shutdown(Shutdown::Both).unwrap();
         drop(self.send_channel.take().unwrap());
 
         self.accept_thread_handle.take().unwrap().join().unwrap();
         self.serve_thread_handle.take().unwrap().join().unwrap();
+        debug!("Host shut down.");
     }
 }

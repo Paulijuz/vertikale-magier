@@ -1,7 +1,6 @@
-pub mod advertiser;
-pub mod client;
-pub mod host;
-pub mod node;
+mod advertiser;
+mod client;
+mod host;
+mod node;
 
-pub use client::Client;
-pub use host::Host;
+pub use node::Node;

@@ -1,4 +1,5 @@
 use crossbeam_channel::{select, tick, unbounded, Receiver, Sender};
+use log::debug;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -125,9 +126,11 @@ impl<T: SendableType> Advertiser<T> {
 
 impl<T: SendableType> Drop for Advertiser<T> {
     fn drop(&mut self) {
+        debug!("Shutting down advertiser...");
         self.control_channel_tx
             .send(AdvertiserCommand::Exit)
             .unwrap();
         self.thread.take().unwrap().join().unwrap();
+        debug!("Advertiser shut down.")
     }
 }

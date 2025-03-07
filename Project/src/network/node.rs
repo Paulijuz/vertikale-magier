@@ -1,6 +1,6 @@
 use crate::network::host::ALL_CLIENTS;
 
-use super::{advertiser::Advertiser, client::SendableType, Client, Host};
+use super::{advertiser::Advertiser, client::SendableType, client::Client, host::Host};
 use crossbeam_channel::{never, select, unbounded, Receiver, Sender};
 use log::{debug, info, warn};
 use std::{
@@ -10,8 +10,8 @@ use std::{
 };
 
 // Use 52 for group 52 <3
-const ADVERTISMENT_IP: [u8; 4] = [239, 0, 0, 52];
-const ADVERTISMENT_PORT: u16 = 52000;
+const NODE_ADVERTISMENT_IP: [u8; 4] = [239, 0, 0, 52];
+const NODE_ADVERTISMENT_PORT: u16 = 52000;
 
 enum Role<T: SendableType> {
     Master(Host<T>),
@@ -23,6 +23,7 @@ pub struct Node<T: SendableType> {
     from_slave_channel: Receiver<T>,
     to_master_channel: Sender<T>,
     to_slaves_channel: Sender<T>,
+    shutdown_channel: Sender<()>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -31,22 +32,25 @@ impl<T: SendableType> Node<T> {
         let (from_master_channel_tx, from_master_channel_rx) = unbounded::<T>();
         let (from_slave_channel_tx, from_slave_channel_rx) = unbounded::<T>();
         let (to_master_channel_tx, to_master_channel_rx) = unbounded::<T>();
-        let (to_slave_channel_tx, to_slave_channel_rx) = unbounded::<T>();
+        let (to_slaves_channel_tx, to_slaves_channel_rx) = unbounded::<T>();
+        let (shutdown_channel_tx, shutdown_channel_rx) = unbounded::<()>();
 
         let thread_handle = spawn(move || {
             run_node(
                 from_master_channel_tx,
                 from_slave_channel_tx,
                 to_master_channel_rx,
-                to_slave_channel_rx,
+                to_slaves_channel_rx,
+                shutdown_channel_rx,
             )
         });
 
         Self {
             from_master_channel: from_master_channel_rx,
             from_slave_channel: from_slave_channel_rx,
-            to_slaves_channel: to_slave_channel_tx,
             to_master_channel: to_master_channel_tx,
+            to_slaves_channel: to_slaves_channel_tx,
+            shutdown_channel: shutdown_channel_tx,
             thread: Some(thread_handle),
         }
     }
@@ -70,7 +74,10 @@ impl<T: SendableType> Node<T> {
 
 impl<T: SendableType> Drop for Node<T> {
     fn drop(&mut self) {
+        debug!("Shutting down node...");
+        self.shutdown_channel.send(()).unwrap();
         self.thread.take().unwrap().join().unwrap();
+        debug!("Node shut down.")
     }
 }
 
@@ -78,12 +85,13 @@ fn run_node<T: SendableType>(
     from_master_channel: Sender<T>,
     from_slave_channel: Sender<T>,
     to_master_channel: Receiver<T>,
-    to_slave_channel: Receiver<T>,
+    to_slaves_channel: Receiver<T>,
+    shutdown_channel: Receiver<()>,
 ) {
     let host: Host<T> = Host::new_tcp_host(0).unwrap();
     let port = host.port();
 
-    let advertiser = Advertiser::new(port, ADVERTISMENT_IP, ADVERTISMENT_PORT).unwrap();
+    let advertiser = Advertiser::new(port, NODE_ADVERTISMENT_IP, NODE_ADVERTISMENT_PORT).unwrap();
     advertiser.start_advertising();
 
     let mut role = Role::Master(host);
@@ -166,7 +174,7 @@ fn run_node<T: SendableType>(
 
                 from_master_channel.send(data).unwrap();
             },
-            recv(to_slave_channel) -> message => {
+            recv(to_slaves_channel) -> message => {
                 let message = message.unwrap();
 
                 match &role {
@@ -186,6 +194,9 @@ fn run_node<T: SendableType>(
                     Role::Slave(client) => client.send_channel().send(message).unwrap(),
                 };
             },
+            recv(shutdown_channel) -> _ => {
+                break;
+            }
         }
     }
 }

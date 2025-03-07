@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use crate::backup::save_state_to_file;
 use crate::elevator::inputs::create_call_button_channel;
 use crate::elevator::{controller::ElevatorEvent, lights::set_call_lights};
-use crate::network::node::Node;
+use crate::network::Node;
 use crate::requests::requests::{Direction, Requests};
 use crate::worldview::{HallRequestState, Worldview};
 
@@ -100,7 +100,7 @@ pub fn run_dispatcher(
                 let timestamp_start_master_server = SystemTime::now();
                 let mut changed = false;
 
-                let requests_map: HashMap<_, _> = worldview
+                let elevator_requests: HashMap<_, _> = worldview
                     .elevators
                     .keys()
                     .map(|name| (name.clone(), worldview.requests_for_elevator(name)))
@@ -109,7 +109,7 @@ pub fn run_dispatcher(
                 // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
                 for (name, elevator) in &mut worldview.elevators {
                     if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
-                        let has_orders = requests_map[name].unwrap().iter().any(|v| v.hall_up || v.hall_down || v.cab);
+                        let has_orders = elevator_requests[name].unwrap().iter().any(|v| v.hall_up || v.hall_down || v.cab);
 
                         if elevator.active && has_orders && duration > Duration::from_secs(5) {
                             info!("Deaktiverer {name} :(");

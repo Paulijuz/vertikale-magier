@@ -6,10 +6,11 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use crate::backup::save_state_to_file;
+use crate::elevator::controller::Direction;
 use crate::elevator::inputs::create_call_button_channel;
 use crate::elevator::{controller::ElevatorEvent, lights::set_call_lights};
 use crate::network::Node;
-use crate::requests::requests::{Direction, Requests};
+use crate::requests::requests::Requests;
 use crate::worldview::{HallRequestState, Worldview};
 
 pub fn send_state_to_maser(to_master: &Sender<Worldview>, mut worldview: Worldview) {
@@ -74,13 +75,13 @@ pub fn run_dispatcher(
 
                         match (&received_request.up, &master_request.up) {
                             (HallRequestState::Requested, HallRequestState::Inactive) => worldview.add_request(floor, Direction::Up),
-                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.hall_requests[floor].up = HallRequestState::Inactive,
+                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.clear_request(floor, Direction::Up),
                             _ => {},
                         }
 
                         match (&received_request.down, &master_request.down) {
                             (HallRequestState::Requested, HallRequestState::Inactive) => worldview.add_request(floor, Direction::Down),
-                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.hall_requests[floor].down = HallRequestState::Inactive,
+                            (HallRequestState::Inactive, HallRequestState::Assigned(_)) => worldview.clear_request(floor, Direction::Down),
                             _ => {},
                         }
                     }
@@ -109,7 +110,7 @@ pub fn run_dispatcher(
                 // Gå gjennom alle heiser og hent timestampen for tildelte forespørsler
                 for (name, elevator) in &mut worldview.elevators {
                     if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
-                        let has_orders = elevator_requests[name].unwrap().iter().any(|v| v.hall_up || v.hall_down || v.cab);
+                        let has_orders = elevator_requests[name].unwrap().any_exists();
 
                         if elevator.active && has_orders && duration > Duration::from_secs(5) {
                             info!("Deaktiverer {name} :(");

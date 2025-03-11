@@ -3,11 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, time::SystemTime};
 
 use crate::{
-    elevator::controller::Behaviour,
-    requests::{
-        assigner,
-        requests::{Direction, Request, Requests, NUMBER_OF_FLOORS},
-    },
+    elevator::controller::{Behaviour, Direction},
+    requests::{assigner, requests::{Requests, NUMBER_OF_FLOORS}},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -147,13 +144,18 @@ impl Worldview {
     pub fn add_request(&mut self, floor: usize, direction: Direction) {
         match direction {
             Direction::Up => self.hall_requests[floor].up = HallRequestState::Requested,
-            Direction::Down => {
-                self.hall_requests[floor].down = HallRequestState::Requested
-            }
+            Direction::Down => self.hall_requests[floor].down = HallRequestState::Requested,
             _ => panic!("Tried to assign request with invalid direction"),
         }
     }
 
+    pub fn clear_request(&mut self, floor: usize, direction: Direction) {
+        match direction {
+            Direction::Up => self.hall_requests[floor].up = HallRequestState::Inactive,
+            Direction::Down => self.hall_requests[floor].down = HallRequestState::Inactive,
+            _ => panic!("Tried to assign request with invalid direction"),
+        }
+    }
     // Velger beste heis for en bestilling
     pub fn assign_requests(&mut self) {
         let hall_requests = self.hall_requests.clone().map(|request| {
@@ -193,20 +195,22 @@ impl Worldview {
         }
     }
     pub fn requests_for_elevator(&self, name: &String) -> Option<Requests> {
-        let mut requests = [Request {
-            cab: false,
-            hall_down: false,
-            hall_up: false,
-        }; NUMBER_OF_FLOORS];
+        let mut requests = Requests::default();
 
         for (floor, cab_request) in self.elevators.get(name)?.cab_requests.iter().enumerate() {
-            requests[floor].cab = *cab_request;
+            if *cab_request {
+                requests.add_cab(floor);
+            }
         }
 
         for (floor, hall_request) in self.hall_requests.iter().enumerate() {
-            requests[floor].hall_up = hall_request.up == HallRequestState::Assigned(name.clone());
-            requests[floor].hall_down =
-                hall_request.down == HallRequestState::Assigned(name.clone());
+            if hall_request.up == HallRequestState::Assigned(name.clone()) {
+                requests.add_up(floor);
+            }
+
+            if hall_request.down == HallRequestState::Assigned(name.clone()) {
+                requests.add_down(floor);
+            }
         }
 
         return Some(requests);

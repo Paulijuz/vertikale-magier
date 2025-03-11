@@ -6,15 +6,22 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    requests::requests::{
-        requests_above_floor, requests_at_floor, requests_below_floor, Direction, Requests,
-    },
+    requests::requests::Requests,
     timer::Timer,
 };
 
-use super::inputs::{create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel};
+use super::inputs::{
+    create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel,
+};
 
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Direction {
+    Up,
+    Down,
+    Stopped,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Behaviour {
@@ -61,37 +68,37 @@ impl<'e> ElevatorController<'e> {
 
         match self.direction {
             Direction::Up => {
-                return if requests_above_floor(&self.requests, floor) {
+                return if self.requests.any_above_floor(floor) {
                     (Direction::Up, Behaviour::Moving)
-                } else if requests_at_floor(&self.requests, floor, Some(Direction::Up)) {
+                } else if self.requests.up_at_floor(floor) {
                     (Direction::Up, Behaviour::DoorOpen)
-                } else if requests_at_floor(&self.requests, floor, None) {
+                } else if self.requests.any_at_floor(floor) {
                     (Direction::Down, Behaviour::DoorOpen)
-                } else if requests_below_floor(&self.requests, floor) {
+                } else if self.requests.any_below_floor(floor) {
                     (Direction::Down, Behaviour::Moving)
                 } else {
                     (Direction::Stopped, Behaviour::Idle)
                 }
             }
             Direction::Down => {
-                return if requests_below_floor(&self.requests, floor) {
+                return if self.requests.any_below_floor(floor) {
                     (Direction::Down, Behaviour::Moving)
-                } else if requests_at_floor(&self.requests, floor, Some(Direction::Down)) {
+                } else if self.requests.up_at_floor(floor) {
                     (Direction::Down, Behaviour::DoorOpen)
-                } else if requests_at_floor(&self.requests, floor, None) {
+                } else if self.requests.any_at_floor(floor) {
                     (Direction::Up, Behaviour::DoorOpen)
-                } else if requests_above_floor(&self.requests, floor) {
+                } else if self.requests.any_above_floor(floor) {
                     (Direction::Up, Behaviour::Moving)
                 } else {
                     (Direction::Stopped, Behaviour::Idle)
                 }
             }
             Direction::Stopped => {
-                return if requests_at_floor(&self.requests, floor, None) {
+                return if self.requests.any_at_floor(floor) {
                     (Direction::Stopped, Behaviour::DoorOpen)
-                } else if requests_above_floor(&self.requests, floor) {
+                } else if self.requests.any_above_floor(floor) {
                     (Direction::Up, Behaviour::Moving)
-                } else if requests_below_floor(&self.requests, floor) {
+                } else if self.requests.any_below_floor(floor) {
                     (Direction::Down, Behaviour::Moving)
                 } else {
                     (Direction::Stopped, Behaviour::Idle)
@@ -106,14 +113,12 @@ impl<'e> ElevatorController<'e> {
 
         match self.direction {
             Direction::Down => {
-                return self.requests[floor].hall_down
-                    || self.requests[floor].cab
-                    || !requests_below_floor(&self.requests, floor)
+                return self.requests.down_at_floor(floor)
+                    || !self.requests.any_below_floor(floor)
             }
             Direction::Up => {
-                return self.requests[floor].hall_up
-                    || self.requests[floor].cab
-                    || !requests_above_floor(&self.requests, floor)
+                return self.requests.any_at_floor(floor)
+                    || !self.requests.any_above_floor(floor)
             }
             Direction::Stopped => return true,
         }

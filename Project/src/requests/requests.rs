@@ -1,42 +1,70 @@
+use std::iter::zip;
+
 use serde::{Deserialize, Serialize};
 
 pub const NUMBER_OF_FLOORS: usize = 4;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Direction {
-    Up,
-    Down,
-    Stopped,
-}
-
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct Request {
-    pub hall_up: bool,
-    pub hall_down: bool,
-    pub cab: bool,
+pub struct Requests {
+    cab: [bool; NUMBER_OF_FLOORS],
+    down: [bool; NUMBER_OF_FLOORS],
+    up: [bool; NUMBER_OF_FLOORS],
 }
 
-pub type Requests = [Request; NUMBER_OF_FLOORS];
+impl Requests {
+    pub fn any_exists(&self) -> bool{
+        self.cab.iter().any(|&r| r)
+            || self.down.iter().any(|&r| r)
+            || self.up.iter().any(|&r| r)
+    }
 
-pub fn requests_below_floor(requests: &Requests, floor: usize) -> bool {
-    requests[..floor]
-        .iter()
-        .any(|request| request.cab || request.hall_down || request.hall_up)
-}
+    pub fn any_at_floor(&self, floor: usize) -> bool {
+        self.cab[floor] || self.up[floor] || self.down[floor]
+    }
 
-pub fn requests_above_floor(requests: &Requests, floor: usize) -> bool {
-    requests[floor + 1..]
-        .iter()
-        .any(|request| request.cab || request.hall_down || request.hall_up)
-}
+    pub fn up_at_floor(&self, floor: usize) -> bool {
+        self.cab[floor] || self.up[floor]
+    }
 
-pub fn requests_at_floor(requests: &Requests, floor: usize, direction: Option<Direction>) -> bool {
-    let request = requests[floor];
+    pub fn down_at_floor(&self, floor: usize) -> bool {
+        self.cab[floor] || self.down[floor]
+    }
 
-    request.cab
-        || match direction {
-            Some(Direction::Up) => request.hall_up,
-            Some(Direction::Down) => request.hall_down,
-            _ => request.hall_up || request.hall_down,
-        }
+    pub fn any_below_floor(&self, floor: usize) -> bool {
+        self.cab[..floor].iter().any(|&r| r)
+        || self.down[..floor].iter().any(|&r| r)
+        || self.up[..floor].iter().any(|&r| r)
+    }
+
+    pub fn any_above_floor(&self, floor: usize) -> bool {
+        self.cab[floor+1..].iter().any(|&r| r)
+        || self.down[floor+1..].iter().any(|&r| r)
+        || self.up[floor+1..].iter().any(|&r| r)
+    }
+
+    pub fn add_up(&mut self, floor: usize) {
+        self.up[floor] = true;
+    }
+
+    pub fn add_down(&mut self, floor: usize) {
+        self.down[floor] = true;
+    }
+
+    pub fn add_cab(&mut self, floor: usize) {
+        self.cab[floor] = true;
+    }
+
+    pub fn clear_up(&mut self, floor: usize) {
+        self.cab[floor] = false;
+        self.up[floor] = false;
+    }
+
+    pub fn clear_down(&mut self, floor: usize) {
+        self.cab[floor] = false;
+        self.down[floor] = false;
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = ((bool, bool), bool)> {
+        zip(self.up, self.down).zip(self.cab)
+    }
 }

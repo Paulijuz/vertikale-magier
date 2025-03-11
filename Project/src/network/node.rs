@@ -1,6 +1,6 @@
 use crate::network::host::ALL_CLIENTS;
 
-use super::{advertiser::Advertiser, client::SendableType, client::Client, host::Host};
+use super::{advertiser::Advertiser, client::Client, client::SendableType, host::Host};
 use crossbeam_channel::{never, select, unbounded, Receiver, Sender};
 use log::{debug, info, warn};
 use std::{

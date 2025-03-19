@@ -106,8 +106,7 @@ fn send<T: Transmit>(socket: Socket, send_channel_rx: Receiver<T>, send_address:
         buffer.extend(DELIMITER.as_bytes());
 
         if socket.send_to(&buffer, &send_address.into()).is_err() {
-            warn!("Tried sending on a shutdown socket.");
-            break;
+            warn!("Could not send on socket. Dropping message.");
         }
     }
 }

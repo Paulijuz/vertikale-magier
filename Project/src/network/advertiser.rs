@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use super::client::{Client, SendableType};
+use super::client::{Client, Transmit};
 
 const ADVERTISING_INTERVAL: Duration = Duration::from_millis(1000);
 const ADVERTISER_ID_LENGTH: usize = 16;
@@ -27,7 +27,7 @@ enum AdvertiserCommand<T> {
     Exit,
 }
 
-pub struct Advertiser<T: SendableType> {
+pub struct Advertiser<T: Transmit> {
     control_channel_tx: Sender<AdvertiserCommand<T>>,
     receive_channel_rx: Receiver<(SocketAddrV4, T)>,
     thread: Option<JoinHandle<()>>,
@@ -39,7 +39,7 @@ fn generate_sender_id() -> [u8; ADVERTISER_ID_LENGTH] {
     return buffer;
 }
 
-fn run_advertiser<T: SendableType>(
+fn run_advertiser<T: Transmit>(
     data: T,
     client: Client<Advertisment<T>>,
     control_channel_rx: Receiver<AdvertiserCommand<T>>,
@@ -83,7 +83,7 @@ fn run_advertiser<T: SendableType>(
     }
 }
 
-impl<T: SendableType> Advertiser<T> {
+impl<T: Transmit> Advertiser<T> {
     pub fn new(advertisment: T, multicast_ip: [u8; 4], port: u16) -> Result<Self> {
         let client: Client<Advertisment<T>> = Client::new_udp_multicast_client(multicast_ip, port)?;
 
@@ -124,7 +124,7 @@ impl<T: SendableType> Advertiser<T> {
     }
 }
 
-impl<T: SendableType> Drop for Advertiser<T> {
+impl<T: Transmit> Drop for Advertiser<T> {
     fn drop(&mut self) {
         debug!("Shutting down advertiser...");
         self.control_channel_tx

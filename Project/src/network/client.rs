@@ -15,10 +15,10 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(50);
 const CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
 
 // Define an empty trait to use as an alias for all of the traits below
-pub trait SendableType: Serialize + de::DeserializeOwned + Clone + Send + 'static {}
-impl<T: Serialize + de::DeserializeOwned + Clone + Send + 'static> SendableType for T {}
+pub trait Transmit: Serialize + de::DeserializeOwned + Clone + Send + 'static {}
+impl<T: Serialize + de::DeserializeOwned + Clone + Send + 'static> Transmit for T {}
 
-pub struct Client<T: SendableType> {
+pub struct Client<T: Transmit> {
     socket: Socket,
     send_channel: Option<Sender<T>>,
     receive_channel: Receiver<(SocketAddrV4, T)>,
@@ -32,7 +32,7 @@ pub enum Message<T> {
     Heartbeat,
 }
 
-fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(SocketAddrV4, T)>) {
+fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAddrV4, T)>) {
     let mut last_received: Option<Instant> = None;
 
     loop {
@@ -74,7 +74,7 @@ fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(Sock
     }
 }
 
-fn send<T: SendableType>(socket: Socket, send_channel_rx: Receiver<T>, send_address: SocketAddrV4) {
+fn send<T: Transmit>(socket: Socket, send_channel_rx: Receiver<T>, send_address: SocketAddrV4) {
     let ticker = tick(HEARTBEAT_INTERVAL);
 
     loop {
@@ -100,7 +100,7 @@ fn send<T: SendableType>(socket: Socket, send_channel_rx: Receiver<T>, send_addr
     }
 }
 
-impl<T: SendableType> Client<T> {
+impl<T: Transmit> Client<T> {
     pub fn new(socket: Socket, send_address: SocketAddrV4) -> Result<Self> {
         let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, T)>();
         let (send_channel_tx, send_channel_rx) = unbounded::<T>();
@@ -148,7 +148,7 @@ impl<T: SendableType> Client<T> {
     }
 }
 
-impl<T: SendableType> Drop for Client<T> {
+impl<T: Transmit> Drop for Client<T> {
     fn drop(&mut self) {
         debug!("Shutting down client...");
         self.socket

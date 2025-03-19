@@ -1,6 +1,4 @@
-use crate::network::host::ALL_CLIENTS;
-
-use super::{advertiser::Advertiser, client::Client, client::SendableType, host::Host};
+use super::{advertiser::Advertiser, client::Client, client::Transmit, host::{Host, ALL_CLIENTS}};
 use crossbeam_channel::{never, select, unbounded, Receiver, Sender};
 use log::{debug, info, warn};
 use std::{
@@ -13,12 +11,12 @@ use std::{
 const NODE_ADVERTISMENT_IP: [u8; 4] = [239, 0, 0, 52];
 const NODE_ADVERTISMENT_PORT: u16 = 52000;
 
-enum Role<T: SendableType> {
+enum Role<T: Transmit> {
     Master(Host<T>),
     Slave(Client<T>),
 }
 
-pub struct Node<T: SendableType> {
+pub struct Node<T: Transmit> {
     from_master_channel: Receiver<T>,
     from_slave_channel: Receiver<T>,
     to_master_channel: Sender<T>,
@@ -27,7 +25,7 @@ pub struct Node<T: SendableType> {
     thread: Option<JoinHandle<()>>,
 }
 
-impl<T: SendableType> Node<T> {
+impl<T: Transmit> Node<T> {
     pub fn new() -> Self {
         let (from_master_channel_tx, from_master_channel_rx) = unbounded::<T>();
         let (from_slave_channel_tx, from_slave_channel_rx) = unbounded::<T>();
@@ -72,7 +70,7 @@ impl<T: SendableType> Node<T> {
     }
 }
 
-impl<T: SendableType> Drop for Node<T> {
+impl<T: Transmit> Drop for Node<T> {
     fn drop(&mut self) {
         debug!("Shutting down node...");
         self.shutdown_channel.send(()).unwrap();
@@ -81,7 +79,7 @@ impl<T: SendableType> Drop for Node<T> {
     }
 }
 
-fn run_node<T: SendableType>(
+fn run_node<T: Transmit>(
     from_master_channel: Sender<T>,
     from_slave_channel: Sender<T>,
     to_master_channel: Receiver<T>,

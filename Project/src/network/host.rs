@@ -9,14 +9,14 @@ use std::{
     time::Duration,
 };
 
-use super::client::{Client, SendableType};
+use super::client::{Client, Transmit};
 
 const BACKLOG_SIZE: i32 = 128;
 const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub const ALL_CLIENTS: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
 
-pub struct Host<T: SendableType> {
+pub struct Host<T: Transmit> {
     socket: Socket,
     send_channel: Option<Sender<(SocketAddrV4, T)>>,
     receive_channel: Receiver<(SocketAddrV4, T)>,
@@ -24,7 +24,7 @@ pub struct Host<T: SendableType> {
     serve_thread_handle: Option<JoinHandle<()>>,
 }
 
-fn accept_clients<T: SendableType>(
+fn accept_clients<T: Transmit>(
     socket: Socket,
     new_client_channel_tx: Sender<(SocketAddrV4, Client<T>)>,
 ) {
@@ -42,7 +42,7 @@ fn accept_clients<T: SendableType>(
     }
 }
 
-fn serve_clients<T: SendableType>(
+fn serve_clients<T: Transmit>(
     new_client_channel_rx: Receiver<(SocketAddrV4, Client<T>)>,
     send_channel_rx: Receiver<(SocketAddrV4, T)>,
     receive_channel_tx: Sender<(SocketAddrV4, T)>,
@@ -91,7 +91,7 @@ fn serve_clients<T: SendableType>(
     }
 }
 
-impl<T: SendableType> Host<T> {
+impl<T: Transmit> Host<T> {
     pub fn new_tcp_host(port: u16) -> Result<Self> {
         let address = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
 
@@ -139,7 +139,7 @@ impl<T: SendableType> Host<T> {
     }
 }
 
-impl<T: SendableType> Drop for Host<T> {
+impl<T: Transmit> Drop for Host<T> {
     fn drop(&mut self) {
         debug!("Shutting down host...");
         self.socket.shutdown(Shutdown::Both).unwrap();

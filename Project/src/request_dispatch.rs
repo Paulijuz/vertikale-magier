@@ -135,6 +135,7 @@ pub fn run_dispatcher(
                     global_worldview.iteration += 1;
 
                     //Inform all slaves about new orders
+                    global_worldview.name = local_worldview.name.clone();
                     node.to_slaves_channel().send(global_worldview.clone()).unwrap();
                 }
             },

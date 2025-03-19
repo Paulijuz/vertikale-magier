@@ -11,7 +11,7 @@ use crate::{
 pub struct ElevatorState {
     pub direction: Direction,
     pub behaviour: Behaviour,
-    pub floor: usize, 
+    pub floor: usize,
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
     pub active: bool,
     pub timestamp_last_event: SystemTime,

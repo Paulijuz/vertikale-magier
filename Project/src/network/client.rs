@@ -10,7 +10,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-const BUFFER_SIZE: usize = 8192; // 8 kB
+const BUFFER_SIZE: usize = 16384; // 16 kB
+const DELIMITER: &str = " | DELIMITER | ";
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(50);
 const CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -34,11 +35,12 @@ pub enum Message<T> {
 
 fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAddrV4, T)>) {
     let mut last_received: Option<Instant> = None;
+    let mut parse_buffer: String= String::new();
 
     loop {
-        let mut buffer = [0; BUFFER_SIZE];
+        let mut receive_buffer = [0; BUFFER_SIZE];
 
-        let (Ok(address), Ok(count)) = (socket.peek_sender(), socket.read(&mut buffer)) else {
+        let (Ok(address), Ok(count)) = (socket.peek_sender(), socket.read(&mut receive_buffer)) else {
             break;
         };
 
@@ -46,23 +48,29 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             break;
         }
 
-        let address = address
-            .as_socket_ipv4()
-            .unwrap_or(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
+        let address = address.as_socket_ipv4().expect("Socket address should be ipv4");
 
-        match serde_json::from_slice(&buffer[..count]) {
-            
-            Ok(Message::Data(data)) => receive_channel_tx.send((address, data)).unwrap(),
-            Ok(Message::Heartbeat) => last_received = Some(Instant::now()),
-            Err(error) => {
-                let data = String::from_utf8_lossy(&buffer[..count]);
-                warn!(
-                    "Could not deserialize received data!\nData: {}\nError: {:?}",
-                    data, error
-                );
+        parse_buffer.push_str(&String::from_utf8_lossy(&receive_buffer[..count]));
+        
+        while let Some(i) = parse_buffer.find(DELIMITER) {
+            let drain: String = parse_buffer.drain(..i).collect();
+            parse_buffer.drain(..DELIMITER.len());
+
+            match serde_json::from_str(&drain) {
+                //Splitter mellom at det er data eller heartbeat
+                Ok(Message::Data(data)) => receive_channel_tx.send((address, data)).unwrap(),
+                Ok(Message::Heartbeat) => last_received = Some(Instant::now()),
+                Err(error) => {
+                    let data = String::from_utf8_lossy(&receive_buffer[..count]);
+                    warn!(
+                        "Could not deserialize received data!\nData: {}\nError: {:?}",
+                        data, error
+                    );
+                }
             }
         }
-        //Temporary function to check if elevator is receiving heartbeats within timeframe.
+
+        //Midlertidig løsning for å sjekke om heisen er i live
         if let Some(last) = last_received {
             if last.elapsed() > CONNECTION_TIMEOUT {
                 error!(
@@ -89,9 +97,11 @@ fn send<T: Transmit>(socket: Socket, send_channel_rx: Receiver<T>, send_address:
             },
         };
 
-        let Ok(buffer) = serde_json::to_vec(&message) else {
+        let Ok(mut buffer) = serde_json::to_vec(&message) else {
             panic!("Could not serialize message!");
         };
+
+        buffer.extend(DELIMITER.as_bytes());
 
         if socket.send_to(&buffer, &send_address.into()).is_err() {
             warn!("Tried sending on a shutdown socket.");

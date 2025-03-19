@@ -68,10 +68,10 @@ impl<'e> ElevatorController<'e> {
 
         match self.direction {
             Direction::Up => {
-                return if self.requests.any_above_floor(floor) {
-                    (Direction::Up, Behaviour::Moving)
-                } else if self.requests.up_at_floor(floor) {
+                return if self.requests.up_at_floor(floor) {
                     (Direction::Up, Behaviour::DoorOpen)
+                } else if self.requests.any_above_floor(floor) {
+                    (Direction::Up, Behaviour::Moving)
                 } else if self.requests.any_at_floor(floor) {
                     (Direction::Down, Behaviour::DoorOpen)
                 } else if self.requests.any_below_floor(floor) {
@@ -85,6 +85,8 @@ impl<'e> ElevatorController<'e> {
                     (Direction::Down, Behaviour::Moving)
                 } else if self.requests.down_at_floor(floor) {
                     (Direction::Down, Behaviour::DoorOpen)
+                } else if self.requests.any_below_floor(floor) {
+                    (Direction::Down, Behaviour::Moving)
                 } else if self.requests.any_at_floor(floor) {
                     (Direction::Up, Behaviour::DoorOpen)
                 } else if self.requests.any_above_floor(floor) {

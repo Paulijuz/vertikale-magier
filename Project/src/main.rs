@@ -45,7 +45,7 @@ fn main() {
     let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
 
     // Load state from backup if available
-    let inital_worldview = match load_state_from_file("backupd.json") {
+    let inital_worldview = match load_state_from_file("backup.json") {
         Ok(mut states) => {
             info!("Loaded backup.");
             states.name = name;

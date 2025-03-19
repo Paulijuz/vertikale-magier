@@ -124,7 +124,7 @@ impl<'e> ElevatorController<'e> {
         }
     }
     fn transision_to_moving(&mut self) {
-        debug!("Bytter til tilstand \"kjører\".");
+        debug!("Changing to state \"moving\".");
         self.behaviour = Behaviour::Moving;
 
         match self.direction {
@@ -136,21 +136,21 @@ impl<'e> ElevatorController<'e> {
                 self.elevio_driver.motor_direction(elevio::elev::DIRN_DOWN);
                 self.direction = Direction::Down;
             }
-            _ => panic!("Prøvde å bytte til tilstand \"kjører\" uten at heisen trenger å kjøre."),
+            _ => panic!("Tried to change to state \"moving\" without elevator having to move."),
         }
     }
     fn transision_to_door_open(&mut self) {
-        debug!("Bytter til tilstand \"dør åpen\".");
+        debug!("Changing to state \"door open\".");
         self.behaviour = Behaviour::DoorOpen;
 
         self.elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
         self.elevio_driver.door_light(true);
 
-        debug!("Dør åpen.");
+        debug!("Door open.");
         self.door_timer.start();
     }
     fn transision_to_idle(&mut self) {
-        debug!("Bytter til tilstand \"inaktiv\".");
+        debug!("Changing to state \"inactive\".");
         self.behaviour = Behaviour::Idle;
     }
 }
@@ -196,7 +196,7 @@ pub fn controller_loop(
             },
             recv(floor_sensor_channel) -> floor => {
                 let floor = floor.unwrap();
-                debug!("Detekterte etasje: {floor}");
+                debug!("Detected floor: {floor}");
 
                 elevio_driver.floor_indicator(floor); // TODO: Bruk sync lights her kanskje?
                 controller.last_floor = Some(floor as usize);
@@ -217,7 +217,7 @@ pub fn controller_loop(
             },
             recv(stop_button_channel) -> stop_button => {
                 let stop_button = stop_button.unwrap();
-                debug!("Detekterte stopknapp: {:}", stop_button);
+                debug!("Detected stop-button: {:}", stop_button);
 
                 if !stop_button {
                     continue;
@@ -228,17 +228,17 @@ pub fn controller_loop(
             },
             recv(obstruction_channel) -> obstruction_switch => {
                 controller.obstruction = obstruction_switch.unwrap();
-                debug!("Detekterte obstruksjon: {:}", controller.obstruction);
+                debug!("Detected obstruction: {:}", controller.obstruction);
             },
             recv(controller.door_timer.timeout_channel()) -> _ => {
                 if controller.obstruction {
-                    debug!("Dør obstruert!");
+                    debug!("Door obstructed!");
                     controller.door_timer.start();
                     continue;
                 }
 
                 elevio_driver.door_light(false);
-                debug!("Dør lukket.");
+                debug!("Door closed.");
 
                 let (next_direction, next_state) = controller.next_direction();
                 controller.direction = next_direction;

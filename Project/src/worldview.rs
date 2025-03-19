@@ -11,7 +11,7 @@ use crate::{
 pub struct ElevatorState {
     pub direction: Direction,
     pub behaviour: Behaviour,
-    pub floor: usize, // TOOD: Denne typen kan vel egentlig være usize?
+    pub floor: usize, 
     pub cab_requests: [bool; NUMBER_OF_FLOORS],
     pub active: bool,
     pub timestamp_last_event: SystemTime,
@@ -47,12 +47,12 @@ impl fmt::Display for ElevatorState {
 
         let age = match SystemTime::now().duration_since(self.timestamp_last_event) {
             Ok(age) => age.as_secs().to_string(),
-            Err(_) => String::from("Fra fremtiden"),
+            Err(_) => String::from("From the future"),
         };
 
         writeln!(
             f,
-            "Alder: {} s\nAktiv: {}\nTilstand: {:?}\nRetning: {:?}\nEtasje: {}\nInterne bestillinger:\n  1 2 3 4\n  {}",
+            "Age: {} s\nActive: {}\nState: {:?}\nDirection: {:?}\nFloor: {}\nInternal orders:\n  1 2 3 4\n  {}",
             age,
             self.active,
             self.behaviour,
@@ -95,15 +95,15 @@ pub struct HallRequest {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Worldview {
     pub name: String,
-    pub elevators: HashMap<String, ElevatorState>, //Liste over alle aktive heiser
+    pub elevators: HashMap<String, ElevatorState>, //List of all active elevators
     pub hall_requests: [HallRequest; NUMBER_OF_FLOORS],
     pub iteration: i32,
 }
 
 impl fmt::Display for Worldview {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Iterasjon: {}", self.iteration)?;
-        writeln!(f, "Heiser:")?;
+        writeln!(f, "Iteration: {}", self.iteration)?;
+        writeln!(f, "Elevators:")?;
 
         let mut sorted_elevators: Vec<(&String, &ElevatorState)> =
             self.elevators.iter().collect::<Vec<_>>();
@@ -117,8 +117,8 @@ impl fmt::Display for Worldview {
             }
         }
 
-        writeln!(f, "Bestillinger:")?;
-        writeln!(f, "  {:>6} | {:<16} | {:<16}", "Etasje", "Ned", "Opp")?;
+        writeln!(f, "Orders:")?;
+        writeln!(f, "  {:>6} | {:<16} | {:<16}", "Floor", "Down", "Up")?;
 
         for (floor, hall_request) in self.hall_requests.iter().enumerate().rev() {
             writeln!(

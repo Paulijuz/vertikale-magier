@@ -51,7 +51,7 @@ fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(Sock
             .unwrap_or(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
 
         match serde_json::from_slice(&buffer[..count]) {
-            //Splitter mellom at det er data eller heartbeat
+            
             Ok(Message::Data(data)) => receive_channel_tx.send((address, data)).unwrap(),
             Ok(Message::Heartbeat) => last_received = Some(Instant::now()),
             Err(error) => {
@@ -62,7 +62,7 @@ fn receive<T: SendableType>(mut socket: Socket, receive_channel_tx: Sender<(Sock
                 );
             }
         }
-        //Midlertidig løsning for å sjekke om heisen er i live
+        //Temporary function to check if elevator is receiving heartbeats within timeframe.
         if let Some(last) = last_received {
             if last.elapsed() > CONNECTION_TIMEOUT {
                 error!(
@@ -79,7 +79,7 @@ fn send<T: SendableType>(socket: Socket, send_channel_rx: Receiver<T>, send_addr
 
     loop {
         let message = select! {
-            // Sende heartbeat mellom klienter, omforme til JSON.
+            // Send heartbeat, transform to JSON.
             recv(ticker) -> _ => Message::Heartbeat,
             recv(send_channel_rx) -> data => {
                 let Ok(data) = data else {

@@ -51,6 +51,7 @@ pub fn run_dispatcher(
                 info!("Master received message from \"{slave_name}\":\n{slave_worldview}");
 
                 let mut master_worldview = global_worldview.clone();
+                master_worldview.name = local_worldview.name.clone();
 
                 // If we have received a message from a deactivated slave, we can
                 // assume that it is alive and activate it again
@@ -96,7 +97,6 @@ pub fn run_dispatcher(
                 }
 
                 master_worldview.iteration += 1;
-                master_worldview.name = local_worldview.name.clone();
 
                 // Send the worldview to all slaves. Slaves will repeat the message back to us as a form of ack.
                 node.to_slaves_channel().send(master_worldview.clone()).unwrap();

@@ -14,7 +14,7 @@ pub fn set_hall_lights(elevator: &Elevator, requests: &[HallRequest; NUMBER_OF_F
     for (floor, hall_request) in requests.iter().enumerate() {
         let floor = floor as u8;
 
-        elevator.call_button_light(floor, HALL_UP, hall_request.down != HallRequestState::Inactive);
-        elevator.call_button_light(floor, HALL_DOWN, hall_request.up != HallRequestState::Inactive);
+        elevator.call_button_light(floor, HALL_UP, hall_request.up != HallRequestState::Inactive);
+        elevator.call_button_light(floor, HALL_DOWN, hall_request.down != HallRequestState::Inactive);
     }
 }

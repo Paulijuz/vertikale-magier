@@ -7,7 +7,8 @@ use std::time::{Duration, SystemTime};
 use crate::backup::save_state_to_file;
 use crate::elevator::controller::Direction;
 use crate::elevator::inputs::create_call_button_channel;
-use crate::elevator::{controller::ElevatorEvent, lights::set_call_lights};
+use crate::elevator::lights::set_hall_lights;
+use crate::elevator::{controller::ElevatorEvent, lights::set_cab_lights};
 use crate::network::Node;
 use crate::requests::requests::Requests;
 use crate::worldview::{HallRequestState, Worldview};
@@ -36,7 +37,9 @@ pub fn run_dispatcher(
                 local_worldview.sync_with_master(global_worldview.clone());
                 let requests = local_worldview.requests_for_local_elevator();
                 
-                set_call_lights(&elevio_driver, &requests);
+                set_cab_lights(&elevio_driver, &requests);
+                set_hall_lights(&elevio_driver, &local_worldview.hall_requests);
+
                 elevator_command_tx.send(requests).unwrap();
 
                 if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {

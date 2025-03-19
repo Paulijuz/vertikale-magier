@@ -33,6 +33,7 @@ pub fn run_dispatcher(
                 info!("Received state from master:\n{global_worldview}");
 
                 // Send new request list to elevator controller and light controller.
+                local_worldview.sync_with_master(global_worldview.clone());
                 let requests = local_worldview.requests_for_local_elevator();
                 
                 set_call_lights(&elevio_driver, &requests);

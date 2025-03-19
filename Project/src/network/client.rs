@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const BUFFER_SIZE: usize = 1 << 13; // 8 kB
+const BUFFER_SIZE: usize = 8192; // 8 kB
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(50);
 const CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
 

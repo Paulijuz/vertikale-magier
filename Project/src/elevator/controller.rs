@@ -83,7 +83,7 @@ impl<'e> ElevatorController<'e> {
             Direction::Down => {
                 return if self.requests.any_below_floor(floor) {
                     (Direction::Down, Behaviour::Moving)
-                } else if self.requests.up_at_floor(floor) {
+                } else if self.requests.down_at_floor(floor) {
                     (Direction::Down, Behaviour::DoorOpen)
                 } else if self.requests.any_at_floor(floor) {
                     (Direction::Up, Behaviour::DoorOpen)

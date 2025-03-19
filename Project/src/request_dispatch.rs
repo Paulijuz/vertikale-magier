@@ -30,7 +30,7 @@ pub fn run_dispatcher(
             recv(node.from_master_channel()) -> message => {
                 global_worldview = message.unwrap();
 
-                info!("Received state from master \"{}\":\n{}", local_worldview.name, global_worldview.name);
+                info!("Received state from master \"{}\":\n{}", global_worldview.name, global_worldview);
 
                 // Send new request list to elevator controller and light controller.
                 local_worldview.sync_with_master(global_worldview.clone());
@@ -94,7 +94,9 @@ pub fn run_dispatcher(
                 if master_worldview.name != slave_worldview.name {
                     master_worldview.assign_requests();
                 }
+
                 master_worldview.iteration += 1;
+                master_worldview.name = local_worldview.name.clone();
 
                 // Send the worldview to all slaves. Slaves will repeat the message back to us as a form of ack.
                 node.to_slaves_channel().send(master_worldview.clone()).unwrap();

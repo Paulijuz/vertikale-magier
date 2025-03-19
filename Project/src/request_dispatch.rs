@@ -40,7 +40,7 @@ pub fn run_dispatcher(
                 elevator_command_tx.send(requests).unwrap();
 
                 if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
-                    node.to_slaves_channel().send(local_worldview.clone()).unwrap();
+                    node.to_master_channel().send(local_worldview.clone()).unwrap();
                 }
             },
             recv(node.from_slave_channel()) -> message => {

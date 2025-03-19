@@ -38,7 +38,7 @@ pub fn run_dispatcher(
                 set_call_lights(&elevio_driver, &requests);
                 elevator_command_tx.send(requests).unwrap();
 
-                if local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
+                if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
                     node.to_slaves_channel().send(local_worldview.clone()).unwrap();
                 }
             },

@@ -48,7 +48,9 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             break;
         }
 
-        let address = address.as_socket_ipv4().expect("Socket address should be ipv4");
+        let address = address
+            .as_socket_ipv4()
+            .unwrap_or(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
 
         parse_buffer.push_str(&String::from_utf8_lossy(&receive_buffer[..count]));
         

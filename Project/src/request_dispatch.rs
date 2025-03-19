@@ -30,7 +30,7 @@ pub fn run_dispatcher(
             recv(node.from_master_channel()) -> message => {
                 global_worldview = message.unwrap();
 
-                info!("Received state from master:\n{global_worldview}");
+                info!("Received state from master \"{}\":\n{}", local_worldview.name, global_worldview.name);
 
                 // Send new request list to elevator controller and light controller.
                 local_worldview.sync_with_master(global_worldview.clone());

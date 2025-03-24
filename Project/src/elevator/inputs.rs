@@ -7,7 +7,8 @@ use std::time::Duration;
 const POLL_PERIOD: Duration = Duration::from_millis(25);
 
 /// Utility function for wrapping elevio "poll functions" with channels.
-/// Optionally an "inital function" can be passed which will be called
+///
+/// Optionally, an "inital function" can be passed which will be called
 /// once when the channel is first created.
 fn create_poll_channel<T: Send + 'static>(
     elevator: &Elevator,

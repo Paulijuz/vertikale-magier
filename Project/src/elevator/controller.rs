@@ -5,10 +5,7 @@ use driver_rust::elevio;
 use log::debug;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    requests::requests::Requests,
-    timer::Timer,
-};
+use crate::{requests::requests::Requests, timer::Timer};
 
 use super::inputs::{
     create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel,
@@ -33,7 +30,7 @@ pub enum Behaviour {
 
 pub struct ElevatorEvent {
     pub direction: Direction,
-    pub state: Behaviour,
+    pub behaviour: Behaviour,
     pub floor: usize,
 }
 
@@ -57,7 +54,7 @@ impl<'e> ElevatorController<'e> {
             direction: Direction::Stopped,
             obstruction: true, // Assume worst until we hear otherwise from driver
             last_floor: Some(0),
-            requests: Default::default(),
+            requests: Requests::new(0),
         }
     }
 
@@ -115,12 +112,10 @@ impl<'e> ElevatorController<'e> {
 
         match self.direction {
             Direction::Down => {
-                return self.requests.down_at_floor(floor)
-                    || !self.requests.any_below_floor(floor)
+                return self.requests.down_at_floor(floor) || !self.requests.any_below_floor(floor)
             }
             Direction::Up => {
-                return self.requests.any_at_floor(floor)
-                    || !self.requests.any_above_floor(floor)
+                return self.requests.any_at_floor(floor) || !self.requests.any_above_floor(floor)
             }
             Direction::Stopped => return true,
         }
@@ -191,7 +186,7 @@ pub fn controller_loop(
                 if controller.behaviour != Behaviour::Idle {
                     elevator_event_tx.send(ElevatorEvent {
                         direction: controller.direction,
-                        state: controller.behaviour,
+                        behaviour: controller.behaviour,
                         floor: controller.last_floor.unwrap(),
                     }).unwrap();
                 }
@@ -213,7 +208,7 @@ pub fn controller_loop(
 
                 elevator_event_tx.send(ElevatorEvent {
                     direction: controller.direction,
-                    state: controller.behaviour,
+                    behaviour: controller.behaviour,
                     floor: controller.last_floor.unwrap(),
                 }).unwrap();
             },
@@ -255,7 +250,7 @@ pub fn controller_loop(
 
                 elevator_event_tx.send(ElevatorEvent {
                     direction: controller.direction,
-                    state: controller.behaviour,
+                    behaviour: controller.behaviour,
                     floor: controller.last_floor.unwrap(),
                 }).unwrap();
             },

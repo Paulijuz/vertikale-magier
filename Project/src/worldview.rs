@@ -4,7 +4,7 @@ use std::{collections::HashMap, fmt, time::SystemTime};
 
 use crate::{
     elevator::controller::{Behaviour, Direction},
-    requests::{assigner, requests::{Requests, NUMBER_OF_FLOORS}},
+    requests::{assigner::{self, HraBehaviour, HraDirection, HraState}, requests::Requests},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -12,26 +12,26 @@ pub struct ElevatorState {
     pub direction: Direction,
     pub behaviour: Behaviour,
     pub floor: usize,
-    pub cab_requests: [bool; NUMBER_OF_FLOORS],
+    pub cab_requests: Vec<bool>,
     pub active: bool,
     pub timestamp_last_event: SystemTime,
 }
 
-impl From<&ElevatorState> for assigner::State {
+impl From<&ElevatorState> for HraState {
     fn from(single_elevator_state: &ElevatorState) -> Self {
-        assigner::State {
+        HraState {
             behaviour: match single_elevator_state.behaviour {
-                Behaviour::DoorOpen => assigner::Behaviour::DoorOpen,
-                Behaviour::Moving => assigner::Behaviour::Moving,
-                _ => assigner::Behaviour::Idle,
+                Behaviour::DoorOpen => HraBehaviour::DoorOpen,
+                Behaviour::Moving => HraBehaviour::Moving,
+                _ => HraBehaviour::Idle,
             },
             floor: single_elevator_state.floor,
             direction: match single_elevator_state.direction {
-                Direction::Down => assigner::Direction::Down,
-                Direction::Stopped => assigner::Direction::Stop,
-                Direction::Up => assigner::Direction::Up,
+                Direction::Down => HraDirection::Down,
+                Direction::Stopped => HraDirection::Stop,
+                Direction::Up => HraDirection::Up,
             },
-            cab_requests: single_elevator_state.cab_requests,
+            cab_requests: single_elevator_state.cab_requests.clone(),
         }
     }
 }
@@ -95,9 +95,10 @@ pub struct HallRequest {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Worldview {
     pub name: String,
-    pub elevators: HashMap<String, ElevatorState>, //List of all active elevators
-    pub hall_requests: [HallRequest; NUMBER_OF_FLOORS],
+    pub elevators: HashMap<String, ElevatorState>, // List of all active elevators
+    pub hall_requests: Vec<HallRequest>,
     pub iteration: i32,
+    number_of_floors: usize,
 }
 
 impl fmt::Display for Worldview {
@@ -135,10 +136,12 @@ impl fmt::Display for Worldview {
 }
 
 impl Worldview {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: String, number_of_floors: usize) -> Self {
         Self {
             name,
-            ..Default::default()
+            hall_requests: vec![HallRequest::default(); number_of_floors],
+            number_of_floors,
+            ..Self::default()
         }
     }
     pub fn add_request(&mut self, floor: usize, direction: Direction) {
@@ -158,12 +161,12 @@ impl Worldview {
     }
     // Velger beste heis for en bestilling
     pub fn assign_requests(&mut self) {
-        let hall_requests = self.hall_requests.clone().map(|request| {
+        let hall_requests = self.hall_requests.iter().map(|request| {
             (
                 request.up != HallRequestState::Inactive,
                 request.down != HallRequestState::Inactive,
             )
-        });
+        }).collect();
         let states = self
             .elevators
             .iter()
@@ -171,10 +174,7 @@ impl Worldview {
             .map(|(k, v)| (k.to_owned(), v.into()))
             .collect();
 
-        let assignments = match assigner::run_hall_request_assigner(assigner::HallRequestsStates {
-            hall_requests,
-            states,
-        }) {
+        let assignments = match assigner::run_hall_request_assigner(hall_requests, states) {
             Ok(assignments) => assignments,
             Err(message) => {
                 error!("Could not assign requests: {message}");
@@ -195,7 +195,7 @@ impl Worldview {
         }
     }
     pub fn requests_for_elevator(&self, name: &String) -> Option<Requests> {
-        let mut requests = Requests::default();
+        let mut requests = Requests::new(self.number_of_floors);
 
         for (floor, cab_request) in self.elevators.get(name)?.cab_requests.iter().enumerate() {
             if *cab_request {
@@ -217,7 +217,7 @@ impl Worldview {
     }
     pub fn requests_for_local_elevator(&self) -> Requests {
         self.requests_for_elevator(&self.name)
-            .unwrap_or(Default::default())
+            .unwrap_or(Requests::new(self.number_of_floors))
     }
     pub fn set_local_elevator_state(&mut self, local_elevator_state: ElevatorState) {
         self.elevators

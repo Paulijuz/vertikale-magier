@@ -1,14 +1,17 @@
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info, warn};
-use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 
 use crate::backup::save_state_to_file;
-use crate::elevator::controller::Direction;
-use crate::elevator::inputs::create_call_button_channel;
-use crate::elevator::lights::set_hall_lights;
-use crate::elevator::{controller::ElevatorEvent, lights::set_cab_lights};
+use crate::elevator::{
+    controller::{Direction, ElevatorEvent},
+    inputs::create_call_button_channel,
+    lights::{set_hall_lights, set_cab_lights},
+};
 use crate::network::Node;
 use crate::requests::requests::Requests;
 use crate::worldview::{HallRequestState, Worldview};
@@ -36,7 +39,7 @@ pub fn run_dispatcher(
                 // Send new request list to elevator controller and light controller.
                 local_worldview.sync_with_master(global_worldview.clone());
                 let requests = local_worldview.requests_for_local_elevator();
-                
+
                 set_cab_lights(&elevio_driver, &requests);
                 set_hall_lights(&elevio_driver, &local_worldview.hall_requests);
 
@@ -67,7 +70,7 @@ pub fn run_dispatcher(
                     info!("New slave connected \"{}\"", slave_name);
                 }
 
-                
+
                 slave_elevator_state.timestamp_last_event = SystemTime::now();
                 master_worldview.elevators.insert(slave_name.clone(), slave_elevator_state);
 
@@ -75,7 +78,7 @@ pub fn run_dispatcher(
                     warn!("Mottok ugyldig verdenssyn. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
                     continue;
                 }
-                
+
                 // Take new and delete completed orders
                 for (floor, received_request) in slave_worldview.hall_requests.iter().enumerate() {
                     let master_request = master_worldview.hall_requests[floor].clone();
@@ -125,7 +128,7 @@ pub fn run_dispatcher(
                 //Go through all elevators and get the timestamp for assigned requests.
                 for (name, elevator) in &mut global_worldview.elevators {
                     if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
-                        let has_orders = elevator_requests[name].unwrap().any_exists();
+                        let has_orders = elevator_requests[name].as_ref().unwrap().any_exists();
 
                         if elevator.active && has_orders && duration > Duration::from_secs(5) {
                             info!("Deactivating {name} :(");
@@ -153,7 +156,7 @@ pub fn run_dispatcher(
                 //Update state to local elevator
                 local_elevator_state.floor = elevator_event.floor;
                 local_elevator_state.direction = elevator_event.direction;
-                local_elevator_state.behaviour = elevator_event.state;
+                local_elevator_state.behaviour = elevator_event.behaviour;
 
                 //Mark order in floor as completed
                 local_elevator_state.cab_requests[elevator_event.floor] = false;
@@ -170,7 +173,7 @@ pub fn run_dispatcher(
                 //Send the updated order list to the elevator controller
                 let requests = local_worldview.requests_for_local_elevator();
                 elevator_command_tx.send(requests).unwrap();
-                
+
                 //Inform the master about the new state
                 node.to_master_channel().send(local_worldview.clone()).unwrap();
             },

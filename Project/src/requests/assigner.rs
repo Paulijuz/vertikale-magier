@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
 
-use super::requests::NUMBER_OF_FLOORS;
-
 #[derive(Serialize, Deserialize)]
-pub enum Behaviour {
+pub enum HraBehaviour {
     #[serde(rename = "idle")]
     Idle,
     #[serde(rename = "moving")]
@@ -14,7 +12,7 @@ pub enum Behaviour {
 }
 
 #[derive(Serialize, Deserialize)]
-pub enum Direction {
+pub enum HraDirection {
     #[serde(rename = "up")]
     Up,
     #[serde(rename = "down")]
@@ -24,33 +22,33 @@ pub enum Direction {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct State {
-    pub behaviour: Behaviour,
+pub struct HraState {
+    pub behaviour: HraBehaviour,
     pub floor: usize,
-    pub direction: Direction,
+    pub direction: HraDirection,
     #[serde(rename = "cabRequests")]
-    pub cab_requests: [bool; NUMBER_OF_FLOORS],
+    pub cab_requests: Vec<bool>,
 }
-
-pub type States = HashMap<String, State>;
-
-pub type HallRequests = [(bool, bool); NUMBER_OF_FLOORS];
 
 #[derive(Serialize, Deserialize)]
-pub struct HallRequestsStates {
+struct HraInput {
     #[serde(rename = "hallRequests")]
-    pub hall_requests: HallRequests,
-    pub states: States,
+    pub hall_requests: Vec<(bool, bool)>,
+    pub states: HashMap<String, HraState>,
 }
 
-pub type AllRequests = [(bool, bool, bool); NUMBER_OF_FLOORS];
-
-pub type HallRequestsAssignments = HashMap<String, AllRequests>;
+type HraOutput = HashMap<String, Vec<(bool, bool, bool)>>;
 
 pub fn run_hall_request_assigner(
-    input: HallRequestsStates,
-) -> Result<HallRequestsAssignments, String> {
-    let input_json = serde_json::to_string(&input).unwrap();
+    hall_requests: Vec<(bool, bool)>,
+    states: HashMap<String, HraState>
+) -> Result<HraOutput, String> {
+    let input_struct = HraInput {
+        hall_requests,
+        states
+    };
+
+    let input_json = serde_json::to_string(&input_struct).unwrap();
 
     let output = Command::new("./hall_request_assigner")
         .arg("--input")

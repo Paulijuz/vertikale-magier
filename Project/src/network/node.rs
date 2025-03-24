@@ -1,4 +1,9 @@
-use super::{advertiser::Advertiser, client::Client, client::Transmit, host::{Host, ALL_CLIENTS}};
+use super::{
+    advertiser::Advertiser,
+    client::Client,
+    client::Transmit,
+    host::{Host, ALL_CLIENTS},
+};
 use crossbeam_channel::{never, select, unbounded, Receiver, Sender};
 use log::{debug, info, warn};
 use std::{

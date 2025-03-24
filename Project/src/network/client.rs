@@ -35,12 +35,13 @@ pub enum Message<T> {
 
 fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAddrV4, T)>) {
     let mut last_received: Option<Instant> = None;
-    let mut parse_buffer: String= String::new();
+    let mut parse_buffer: String = String::new();
 
     loop {
         let mut receive_buffer = [0; BUFFER_SIZE];
 
-        let (Ok(address), Ok(count)) = (socket.peek_sender(), socket.read(&mut receive_buffer)) else {
+        let (Ok(address), Ok(count)) = (socket.peek_sender(), socket.read(&mut receive_buffer))
+        else {
             break;
         };
 
@@ -53,7 +54,7 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             .unwrap_or(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
 
         parse_buffer.push_str(&String::from_utf8_lossy(&receive_buffer[..count]));
-        
+
         while let Some(i) = parse_buffer.find(DELIMITER) {
             let drain: String = parse_buffer.drain(..i).collect();
             parse_buffer.drain(..DELIMITER.len());

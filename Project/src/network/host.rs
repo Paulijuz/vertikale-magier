@@ -14,6 +14,7 @@ use super::client::{Client, Transmit};
 const BACKLOG_SIZE: i32 = 128;
 const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+/// Reserved address used to send messages to all connected clients
 pub const ALL_CLIENTS: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
 
 pub struct Host<T: Transmit> {

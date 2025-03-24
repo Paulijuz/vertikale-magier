@@ -18,18 +18,19 @@ mod timer;
 mod worldview;
 
 #[derive(Debug, Parser)]
+/// Group 52's amazing distributed elevator control system.
 struct Args {
+    /// Name to use as identifier for this elevator. If not specified a random name will be chosen.
     #[arg(long, short)]
     name: Option<String>,
 
+    /// Port of the elevator server to connect to.
     #[arg(long, short, default_value_t = 15657)]
     port: u16,
 
-    #[arg(long, short, default_value_t = false)]
-    master: bool,
-
-    #[arg(long, short, default_value_t = false)]
-    slave: bool,
+    /// Number of floors the elevator has.
+    #[arg(long, short = 'f', default_value_t = 4)]
+    number_of_floors: usize,
 }
 
 fn main() {
@@ -53,7 +54,7 @@ fn main() {
         }
         Err(_) => {
             info!("No backup found.");
-            Worldview::new(name)
+            Worldview::new(name, args.number_of_floors)
         }
     };
 

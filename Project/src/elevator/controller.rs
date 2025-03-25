@@ -83,7 +83,7 @@ fn next_state(floor: usize, direction: Direction, requests: &Requests) -> (Direc
 fn should_stop(floor: usize, direction: Direction, requests: &Requests) -> bool {
     match direction {
         Direction::Down => requests.down_at_floor(floor) || !requests.any_below_floor(floor),
-        Direction::Up => requests.any_at_floor(floor) || !requests.any_above_floor(floor),
+        Direction::Up => requests.up_at_floor(floor) || !requests.any_above_floor(floor),
         Direction::Stopped => true,
     }
 }

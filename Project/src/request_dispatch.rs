@@ -25,7 +25,7 @@ pub fn run_dispatcher(
 ) {
     let mut global_worldview = Worldview::new(String::from(""), elevio_driver.num_floors as usize);
     let mut local_worldview = inital_worldview;
-    let ticker = tick(Duration::from_millis(1000));
+    let deactivation_ticker = tick(Duration::from_millis(1000));
     let node = Node::<Worldview>::new();
     let call_button_channel = create_call_button_channel(elevio_driver);
 
@@ -114,7 +114,7 @@ pub fn run_dispatcher(
                 }
             },
             //Start to inform slaves that master exists
-            recv(ticker) -> _ => {
+            recv(deactivation_ticker) -> _ => {
                 //Received current timestamp
                 let timestamp_start_master_server = SystemTime::now();
                 let mut changed = false;

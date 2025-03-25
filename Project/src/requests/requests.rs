@@ -10,11 +10,11 @@ pub struct Requests {
 
 impl Requests {
     /// Creates a new empty requests struct with given number of floors.
-    pub fn new(number_of_floors: usize) -> Self {
+    pub fn new(num_floors: usize) -> Self {
         Self {
-            cab: vec![false; number_of_floors],
-            down: vec![false; number_of_floors],
-            up: vec![false; number_of_floors],
+            cab: vec![false; num_floors],
+            down: vec![false; num_floors],
+            up: vec![false; num_floors],
         }
     }
 

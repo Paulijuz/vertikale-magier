@@ -8,7 +8,7 @@ use std::{
 
 use crate::backup::save_state_to_file;
 use crate::elevator::{
-    controller::{Direction, ElevatorEvent},
+    controller::{Direction, ElevatorState},
     inputs::create_call_button_channel,
     lights::{set_hall_lights, set_cab_lights},
 };
@@ -21,9 +21,9 @@ pub fn run_dispatcher(
     inital_worldview: Worldview,
     elevio_driver: &Elevator,
     elevator_command_tx: Sender<Requests>,
-    elevator_event_rx: Receiver<ElevatorEvent>,
+    elevator_event_rx: Receiver<ElevatorState>,
 ) {
-    let mut global_worldview = Worldview::default();
+    let mut global_worldview = Worldview::new(String::from(""), elevio_driver.num_floors as usize);
     let mut local_worldview = inital_worldview;
     let ticker = tick(Duration::from_millis(1000));
     let node = Node::<Worldview>::new();

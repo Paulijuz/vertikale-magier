@@ -92,13 +92,13 @@ pub struct HallRequest {
     pub down: HallRequestState,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Worldview {
     pub name: String,
     pub elevators: HashMap<String, ElevatorState>, // List of all active elevators
     pub hall_requests: Vec<HallRequest>,
     pub iteration: i32,
-    number_of_floors: usize,
+    num_floors: usize,
 }
 
 impl fmt::Display for Worldview {
@@ -136,12 +136,13 @@ impl fmt::Display for Worldview {
 }
 
 impl Worldview {
-    pub fn new(name: String, number_of_floors: usize) -> Self {
+    pub fn new(name: String, num_floors: usize) -> Self {
         Self {
             name,
-            hall_requests: vec![HallRequest::default(); number_of_floors],
-            number_of_floors,
-            ..Self::default()
+            hall_requests: vec![HallRequest::default(); num_floors],
+            num_floors,
+            elevators: HashMap::new(),
+            iteration: 0,
         }
     }
     pub fn add_request(&mut self, floor: usize, direction: Direction) {
@@ -195,7 +196,7 @@ impl Worldview {
         }
     }
     pub fn requests_for_elevator(&self, name: &String) -> Option<Requests> {
-        let mut requests = Requests::new(self.number_of_floors);
+        let mut requests = Requests::new(self.num_floors);
 
         for (floor, cab_request) in self.elevators.get(name)?.cab_requests.iter().enumerate() {
             if *cab_request {
@@ -217,7 +218,7 @@ impl Worldview {
     }
     pub fn requests_for_local_elevator(&self) -> Requests {
         self.requests_for_elevator(&self.name)
-            .unwrap_or(Requests::new(self.number_of_floors))
+            .unwrap_or(Requests::new(self.num_floors))
     }
     pub fn set_local_elevator_state(&mut self, local_elevator_state: ElevatorState) {
         self.elevators
@@ -229,7 +230,7 @@ impl Worldview {
                 self.name.clone(),
                 ElevatorState {
                     active: true,
-                    cab_requests: Default::default(),
+                    cab_requests: vec![false; self.num_floors],
                     direction: Direction::Stopped,
                     floor: 0,
                     behaviour: Behaviour::Idle,

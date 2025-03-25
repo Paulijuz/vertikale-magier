@@ -34,14 +34,13 @@ pub enum Message<T> {
 }
 
 fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAddrV4, T)>) {
-    let mut last_received: Option<Instant> = None;
+    let mut last_received: Instant = Instant::now();
     let mut parse_buffer: String = String::new();
 
     loop {
         let mut receive_buffer = [0; BUFFER_SIZE];
 
-        let (Ok(address), Ok(count)) = (socket.peek_sender(), socket.read(&mut receive_buffer))
-        else {
+        let (Ok(address), Ok(count)) = (socket.peek_sender(), socket.read(&mut receive_buffer)) else {
             break;
         };
 
@@ -62,7 +61,7 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             match serde_json::from_str(&drain) {
                 //Splitter mellom at det er data eller heartbeat
                 Ok(Message::Data(data)) => receive_channel_tx.send((address, data)).unwrap(),
-                Ok(Message::Heartbeat) => last_received = Some(Instant::now()),
+                Ok(Message::Heartbeat) => last_received = Instant::now(),
                 Err(error) => {
                     let data = String::from_utf8_lossy(&receive_buffer[..count]);
                     warn!(
@@ -73,14 +72,12 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             }
         }
 
-        //Midlertidig løsning for å sjekke om heisen er i live
-        if let Some(last) = last_received {
-            if last.elapsed() > CONNECTION_TIMEOUT {
-                error!(
-                    "No heartbeats received for {} ms, it's dead",
-                    last.elapsed().as_millis()
-                );
-            }
+        if last_received.elapsed() > CONNECTION_TIMEOUT {
+            error!(
+                "No heartbeats received for {} ms, it's dead.",
+                last_received.elapsed().as_millis()
+            );
+            break;
         }
     }
 }
@@ -107,7 +104,8 @@ fn send<T: Transmit>(socket: Socket, send_channel_rx: Receiver<T>, send_address:
         buffer.extend(DELIMITER.as_bytes());
 
         if socket.send_to(&buffer, &send_address.into()).is_err() {
-            warn!("Could not send on socket. Dropping message.");
+            warn!("Could not send on socket.");
+            break;
         }
     }
 }

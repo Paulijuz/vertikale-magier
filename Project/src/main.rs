@@ -30,7 +30,7 @@ struct Args {
 
     /// Number of floors the elevator has.
     #[arg(long, short = 'f', default_value_t = 4)]
-    number_of_floors: usize,
+    num_floors: usize,
 }
 
 fn main() {
@@ -41,7 +41,7 @@ fn main() {
     let args = Args::parse();
 
     let elevio_driver =
-        elevio::elev::Elevator::init(&format!("localhost:{}", args.port), 4).unwrap();
+        elevio::elev::Elevator::init(&format!("localhost:{}", args.port), args.num_floors as u8).unwrap();
 
     let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
 
@@ -54,7 +54,7 @@ fn main() {
         }
         Err(_) => {
             info!("No backup found.");
-            Worldview::new(name, args.number_of_floors)
+            Worldview::new(name, args.num_floors)
         }
     };
 

@@ -1,7 +1,7 @@
 use std::time::Duration;
 use crossbeam_channel as cbc;
 use driver_rust::elevio::{self, elev::DIRN_STOP};
-use log::{debug, warn};
+use log::{debug, warn, error};
 use serde::{Deserialize, Serialize};
 
 use crate::{elevator::lights::set_state_lights, requests::requests::Requests, timer::Timer};
@@ -32,6 +32,12 @@ pub struct ElevatorState {
     pub behaviour: Behaviour,
     pub obstruction: bool,
     pub floor: usize, // Floor is usize as it's primaraly used for indexing.
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ElevatorEvent {
+    StateUpdated(ElevatorState),
+    FloorCleared((usize, Direction)),
 }
 
 /// Returns the next direction and behaviour the elevator should move/be in based on
@@ -88,6 +94,14 @@ fn should_stop(floor: usize, direction: Direction, requests: &Requests) -> bool 
     }
 }
 
+fn should_instantly_clear(floor: usize, direction: Direction, requests: &Requests) -> bool {
+    match direction {
+        Direction::Down => requests.down_at_floor(floor),
+        Direction::Up => requests.up_at_floor(floor),
+        Direction::Stopped => requests.any_at_floor(floor),
+    }
+}
+
 /// Starts the motor in the given direction.
 /// 
 /// **Note:** Trying to start the motor in the direction `Stopped` will return an error.
@@ -138,8 +152,8 @@ fn close_door(elevio_driver: &elevio::elev::Elevator) -> Result<(), ()> {
 /// **Note:** This function blocks execution.
 pub fn controller_loop(
     elevio_driver: &elevio::elev::Elevator,
-    command_channel_rx: cbc::Receiver<Requests>,
-    elevator_event_tx: cbc::Sender<ElevatorState>,
+    elevator_command_rx: cbc::Receiver<Requests>,
+    elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
     let floor_sensor_channel = create_floor_sensor_channel(elevio_driver);
     let obstruction_channel = create_obstruction_channel(elevio_driver);
@@ -160,29 +174,36 @@ pub fn controller_loop(
         // Only send the state if it has changed.
         if Some(state) != previous_state {
             previous_state = Some(state);
-            elevator_event_tx.send(state).unwrap();
+            elevator_event_tx.send(ElevatorEvent::StateUpdated(state)).unwrap();
             set_state_lights(elevio_driver, state);
         }
 
         cbc::select! {
-            recv(command_channel_rx) -> command => {
+            recv(elevator_command_rx) -> command => {
                 requests = command.unwrap();
                 debug!("Elevator controller recieved new requests: {:?}", requests);
 
-                // Only act upon received requests if we're not already doing something.
-                if state.behaviour != Behaviour::Idle {
-                    continue;
-                }
-
-                (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
-
                 match state.behaviour {
                     Behaviour::DoorOpen => {
-                        open_door(elevio_driver);
-                        door_timer.start();
+                        if should_instantly_clear(state.floor, state.direction, &requests) {
+                            elevator_event_tx.send(ElevatorEvent::FloorCleared((state.floor, state.direction))).unwrap();
+                            door_timer.restart();
+                        }
                     },
-                    Behaviour::Moving => {
-                        start_motor(elevio_driver, state.direction);
+                    Behaviour::Idle => {
+                        (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
+
+                        match state.behaviour {
+                            Behaviour::DoorOpen => {
+                                open_door(elevio_driver);
+                                elevator_event_tx.send(ElevatorEvent::FloorCleared((state.floor, state.direction))).unwrap();
+                                door_timer.start();
+                            },
+                            Behaviour::Moving => {
+                                start_motor(elevio_driver, state.direction);
+                            },
+                            _ => {},
+                        }
                     },
                     _ => {},
                 }
@@ -201,6 +222,7 @@ pub fn controller_loop(
                     if requests.any_at_floor(state.floor) {
                         state.behaviour = Behaviour::DoorOpen;
                         open_door(elevio_driver);
+                        elevator_event_tx.send(ElevatorEvent::FloorCleared((state.floor, state.direction))).unwrap();
                         door_timer.start();
                     } else {
                         state.behaviour = Behaviour::Idle;
@@ -241,6 +263,7 @@ pub fn controller_loop(
                 match state.behaviour {
                     Behaviour::DoorOpen => {
                         open_door(elevio_driver);
+                        elevator_event_tx.send(ElevatorEvent::FloorCleared((state.floor, state.direction))).unwrap();
                         door_timer.start();
                     },
                     Behaviour::Moving => {

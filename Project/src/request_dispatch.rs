@@ -6,9 +6,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::{backup::save_state_to_file, elevator::controller::Behaviour};
+use crate::backup::save_state_to_file;
 use crate::elevator::{
-    controller::{Direction, ElevatorState},
+    controller::{Direction, ElevatorEvent},
     inputs::create_call_button_channel,
     lights::{set_hall_lights, set_cab_lights},
 };
@@ -20,7 +20,7 @@ pub fn run_dispatcher(
     inital_worldview: Worldview,
     elevio_driver: &Elevator,
     elevator_command_tx: Sender<Requests>,
-    elevator_event_rx: Receiver<ElevatorState>,
+    elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
     let mut global_worldview = Worldview::new(String::from(""), elevio_driver.num_floors as usize);
     let mut local_worldview = inital_worldview;
@@ -149,31 +149,30 @@ pub fn run_dispatcher(
             recv(elevator_event_rx) -> elevator_event => {
                 let elevator_event = elevator_event.unwrap();
 
-                let local_elevator_state = local_worldview.local_elevator_state();
+                let local_elevator = local_worldview.local_elevator_state();
 
-                //Update state to local elevator
-                local_elevator_state.floor = elevator_event.floor;
-                local_elevator_state.direction = elevator_event.direction;
-                local_elevator_state.behaviour = elevator_event.behaviour;
+                match elevator_event {
+                    ElevatorEvent::FloorCleared((floor, direction)) => {
+                        local_elevator.cab_requests[floor] = false;
 
-                //Mark order in floor as completed
-                if elevator_event.behaviour == Behaviour::DoorOpen {
-                    local_elevator_state.cab_requests[elevator_event.floor] = false;
+                        if direction != Direction::Down {
+                            debug!("Cleared up.");
+                            local_worldview.hall_requests[floor].up = HallRequestState::Inactive;
+                        }
+                        if direction != Direction::Up {
+                            debug!("Cleared down.");
+                            local_worldview.hall_requests[floor].down = HallRequestState::Inactive;
+                        }
     
-                    if elevator_event.direction != Direction::Down {
-                        debug!("Cleared up.");
-                        local_worldview.hall_requests[elevator_event.floor].up = HallRequestState::Inactive;
-                    }
-                    if elevator_event.direction != Direction::Up {
-                        debug!("Cleared down.");
-                        local_worldview.hall_requests[elevator_event.floor].down = HallRequestState::Inactive;
-                    }
-
-                    //Send the updated order list to the elevator controller
-                    let requests = local_worldview.requests_for_local_elevator();
-                    elevator_command_tx.send(requests).unwrap();
+                        //Send the updated order list to the elevator controller
+                        let requests = local_worldview.requests_for_local_elevator();
+                        elevator_command_tx.send(requests).unwrap();
+                    },
+                    ElevatorEvent::StateUpdated(state) => {
+                        local_elevator.state = state;
+                    },
                 }
-                
+
                 //Inform the master about the new state
                 node.to_master_channel().send(local_worldview.clone()).unwrap();
             },

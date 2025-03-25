@@ -27,12 +27,12 @@ pub fn set_hall_lights(elevio_driver: &Elevator, requests: &Vec<HallRequest>) {
         elevio_driver.call_button_light(
             floor,
             HALL_UP,
-            hall_request.up != HallRequestState::Inactive,
+            matches!(hall_request.up, HallRequestState::Assigned(_)),
         );
         elevio_driver.call_button_light(
             floor,
             HALL_DOWN,
-            hall_request.down != HallRequestState::Inactive,
+            matches!(hall_request.down, HallRequestState::Assigned(_)),
         );
     }
 }

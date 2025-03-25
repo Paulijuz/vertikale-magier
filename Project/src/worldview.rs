@@ -3,40 +3,38 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, time::SystemTime};
 
 use crate::{
-    elevator::controller::{Behaviour, Direction},
+    elevator::controller::{Behaviour, Direction, ElevatorState},
     requests::{assigner::{self, HraBehaviour, HraDirection, HraState}, requests::Requests},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ElevatorState {
-    pub direction: Direction,
-    pub behaviour: Behaviour,
-    pub floor: usize,
+pub struct ElevatorView {
+    pub state: ElevatorState,
     pub cab_requests: Vec<bool>,
     pub active: bool,
     pub timestamp_last_event: SystemTime,
 }
 
-impl From<&ElevatorState> for HraState {
-    fn from(single_elevator_state: &ElevatorState) -> Self {
+impl From<&ElevatorView> for HraState {
+    fn from(elevator_view: &ElevatorView) -> Self {
         HraState {
-            behaviour: match single_elevator_state.behaviour {
+            behaviour: match elevator_view.state.behaviour {
                 Behaviour::DoorOpen => HraBehaviour::DoorOpen,
                 Behaviour::Moving => HraBehaviour::Moving,
                 _ => HraBehaviour::Idle,
             },
-            floor: single_elevator_state.floor,
-            direction: match single_elevator_state.direction {
+            floor: elevator_view.state.floor,
+            direction: match elevator_view.state.direction {
                 Direction::Down => HraDirection::Down,
                 Direction::Stopped => HraDirection::Stop,
                 Direction::Up => HraDirection::Up,
             },
-            cab_requests: single_elevator_state.cab_requests.clone(),
+            cab_requests: elevator_view.cab_requests.clone(),
         }
     }
 }
 
-impl fmt::Display for ElevatorState {
+impl fmt::Display for ElevatorView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let cab_requests_string = self
             .cab_requests
@@ -55,9 +53,9 @@ impl fmt::Display for ElevatorState {
             "Age: {} s\nActive: {}\nState: {:?}\nDirection: {:?}\nFloor: {}\nInternal orders:\n  1 2 3 4\n  {}",
             age,
             self.active,
-            self.behaviour,
-            self.direction,
-            self.floor + 1,
+            self.state.behaviour,
+            self.state.direction,
+            self.state.floor + 1,
             cab_requests_string,
         )
     }
@@ -95,7 +93,7 @@ pub struct HallRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Worldview {
     pub name: String,
-    pub elevators: HashMap<String, ElevatorState>, // List of all active elevators
+    pub elevators: HashMap<String, ElevatorView>, // List of all active elevators
     pub hall_requests: Vec<HallRequest>,
     pub iteration: i32,
     num_floors: usize,
@@ -106,7 +104,7 @@ impl fmt::Display for Worldview {
         writeln!(f, "Iteration: {}", self.iteration)?;
         writeln!(f, "Elevators:")?;
 
-        let mut sorted_elevators: Vec<(&String, &ElevatorState)> =
+        let mut sorted_elevators: Vec<(&String, &ElevatorView)> =
             self.elevators.iter().collect::<Vec<_>>();
         sorted_elevators.sort_by_key(|(name, _)| *name);
 
@@ -220,20 +218,23 @@ impl Worldview {
         self.requests_for_elevator(&self.name)
             .unwrap_or(Requests::new(self.num_floors))
     }
-    pub fn set_local_elevator_state(&mut self, local_elevator_state: ElevatorState) {
+    pub fn set_local_elevator_state(&mut self, local_elevator_state: ElevatorView) {
         self.elevators
             .insert(self.name.clone(), local_elevator_state.clone());
     }
-    pub fn local_elevator_state(&mut self) -> &mut ElevatorState {
+    pub fn local_elevator_state(&mut self) -> &mut ElevatorView {
         if !self.elevators.contains_key(&self.name) {
             self.elevators.insert(
                 self.name.clone(),
-                ElevatorState {
+                ElevatorView {
                     active: true,
                     cab_requests: vec![false; self.num_floors],
-                    direction: Direction::Stopped,
-                    floor: 0,
-                    behaviour: Behaviour::Idle,
+                    state: ElevatorState {
+                        direction: Direction::Stopped,
+                        behaviour: Behaviour::Idle,
+                        obstruction: false,
+                        floor: 0,
+                    },
                     timestamp_last_event: SystemTime::now(),
                 },
             );

@@ -1,13 +1,13 @@
-use std::time::Duration;
 use crossbeam_channel as cbc;
 use driver_rust::elevio::{self, elev::DIRN_STOP};
-use log::{debug, warn, error};
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-use crate::{elevator::lights::set_state_lights, requests::requests::Requests, timer::Timer};
 use super::inputs::{
     create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel,
 };
+use crate::{elevator::lights::set_state_lights, requests::requests::Requests, timer::Timer};
 
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 
@@ -103,7 +103,7 @@ fn should_instantly_clear(floor: usize, direction: Direction, requests: &Request
 }
 
 /// Starts the motor in the given direction.
-/// 
+///
 /// **Note:** Trying to start the motor in the direction `Stopped` will return an error.
 fn start_motor(elevio_driver: &elevio::elev::Elevator, direction: Direction) -> Result<(), ()> {
     match direction {
@@ -121,10 +121,10 @@ fn open_door(elevio_driver: &elevio::elev::Elevator) -> Result<(), ()> {
     // There is no way to check that the motor is stopped with elevio,
     // so we'll just set the motor to be stopped to be sure.
     elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
-    
+
     if elevio_driver.floor_sensor().is_none() {
         warn!("Tried opening door while not stopped at a floor.");
-        return Err(())
+        return Err(());
     }
 
     elevio_driver.door_light(true);
@@ -148,7 +148,7 @@ fn close_door(elevio_driver: &elevio::elev::Elevator) -> Result<(), ()> {
 
 /// The main loop for the elevator FSM. It is an event based loop that listen for events from
 /// the elevio driver and the `command_channel`. TODO: Further explain command channel.
-/// 
+///
 /// **Note:** This function blocks execution.
 pub fn controller_loop(
     elevio_driver: &elevio::elev::Elevator,
@@ -166,7 +166,7 @@ pub fn controller_loop(
         behaviour: Behaviour::Idle,
         direction: Direction::Stopped,
         obstruction: true, // Assume worst until we hear otherwise
-        floor: 0, // TODO: Make sure the elevator starts in a defined state
+        floor: 0,          // TODO: Make sure the elevator starts in a defined state
     };
     let mut previous_state: Option<ElevatorState> = None;
 
@@ -174,7 +174,9 @@ pub fn controller_loop(
         // Only send the state if it has changed.
         if Some(state) != previous_state {
             previous_state = Some(state);
-            elevator_event_tx.send(ElevatorEvent::StateUpdated(state)).unwrap();
+            elevator_event_tx
+                .send(ElevatorEvent::StateUpdated(state))
+                .unwrap();
             set_state_lights(elevio_driver, state);
         }
 
@@ -218,7 +220,7 @@ pub fn controller_loop(
 
                 if should_stop(state.floor, state.direction, &requests) {
                     elevio_driver.motor_direction(DIRN_STOP);
-    
+
                     if requests.any_at_floor(state.floor) {
                         state.behaviour = Behaviour::DoorOpen;
                         open_door(elevio_driver);

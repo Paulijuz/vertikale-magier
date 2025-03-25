@@ -6,6 +6,7 @@ use super::{
 };
 use crossbeam_channel::{never, select, unbounded, Receiver, Sender};
 use log::{debug, info, warn};
+use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddrV4,
     thread::{sleep, spawn, JoinHandle},
@@ -21,6 +22,12 @@ enum Role<T: Transmit> {
     Slave(Client<T>),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NodeAdvertisment {
+    name: String,
+    port: u16,
+}
+
 pub struct Node<T: Transmit> {
     from_master_channel: Receiver<T>,
     from_slave_channel: Receiver<T>,
@@ -31,7 +38,7 @@ pub struct Node<T: Transmit> {
 }
 
 impl<T: Transmit> Node<T> {
-    pub fn new() -> Self {
+    pub fn new(name: String) -> Self {
         let (from_master_channel_tx, from_master_channel_rx) = unbounded::<T>();
         let (from_slave_channel_tx, from_slave_channel_rx) = unbounded::<T>();
         let (to_master_channel_tx, to_master_channel_rx) = unbounded::<T>();
@@ -40,6 +47,7 @@ impl<T: Transmit> Node<T> {
 
         let thread_handle = spawn(move || {
             run_node(
+                name,
                 from_master_channel_tx,
                 from_slave_channel_tx,
                 to_master_channel_rx,
@@ -85,16 +93,26 @@ impl<T: Transmit> Drop for Node<T> {
 }
 
 fn run_node<T: Transmit>(
+    name: String,
     from_master_channel: Sender<T>,
     from_slave_channel: Sender<T>,
     to_master_channel: Receiver<T>,
     to_slaves_channel: Receiver<T>,
     shutdown_channel: Receiver<()>,
 ) {
-    let host: Host<T> = Host::new_tcp_host(0).unwrap();
+    let host = Host::<T>::new_tcp_host(0).unwrap();
     let port = host.port();
 
-    let advertiser = Advertiser::new(port, NODE_ADVERTISMENT_IP, NODE_ADVERTISMENT_PORT).unwrap();
+    let advertisment = NodeAdvertisment {
+        name: name.clone(),
+        port,
+    };
+    let advertiser = Advertiser::new(
+        Some(advertisment),
+        NODE_ADVERTISMENT_IP,
+        NODE_ADVERTISMENT_PORT,
+    )
+    .unwrap();
     advertiser.start_advertising();
 
     let mut role = Role::Master(host);
@@ -115,13 +133,13 @@ fn run_node<T: Transmit>(
 
         select! {
             recv(advertiser.receive_channel()) -> advertisment => {
-                let (address, port) = advertisment.unwrap();
+                let (address, advertisment) = advertisment.unwrap();
 
-                let master_address = SocketAddrV4::new(*address.ip(), port);
+                let master_address = SocketAddrV4::new(*address.ip(), advertisment.port);
 
                 match &role {
                     Role::Master(_) => {
-                        info!("\nFound another master node: {master_address}");
+                        info!("\nFound master node \"{}\": {}", advertisment.name, master_address);
                         advertiser.stop_advertising();
 
                         debug!("Waiting to connect...");
@@ -129,14 +147,15 @@ fn run_node<T: Transmit>(
                         // The master with the shorter wait time wins!
                         sleep(Duration::from_millis(rand::random_range(0..=100)));
                         // TODO: Find a better way to arbitrate masters.
+                        debug!("Connect...");
 
                         if let Ok(client) = Client::new_tcp_client(address.ip().octets(), port) {
                             role = Role::Slave(client);
-                            info!("Successfully connected to master! Now slave.");
+                            info!("Successfully connected to master \"{}\"! Now slave.", advertisment.name);
                             continue;
                         }
 
-                        info!("Could not connect to master.");
+                        info!("Could not connect to master \"{}\".", advertisment.name);
                         advertiser.start_advertising();
                     },
                     _ => {},
@@ -166,7 +185,11 @@ fn run_node<T: Transmit>(
                     let host = Host::new_tcp_host(0).unwrap();
                     let port = host.port();
 
-                    advertiser.set_advertisment(port);
+                    let advertisment = NodeAdvertisment {
+                        name: name.clone(),
+                        port,
+                    };
+                    advertiser.set_advertisment(advertisment);
                     advertiser.start_advertising();
 
                     role = Role::Master(host);

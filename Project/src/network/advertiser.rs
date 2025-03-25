@@ -40,15 +40,13 @@ fn generate_sender_id() -> [u8; ADVERTISER_ID_LENGTH] {
 }
 
 fn run_advertiser<T: Transmit>(
-    data: T,
+    data: Option<T>,
     client: Client<Advertisment<T>>,
     control_channel_rx: Receiver<AdvertiserCommand<T>>,
     receive_channel_tx: Sender<(SocketAddrV4, T)>,
 ) {
-    let mut advertisment = Advertisment {
-        sender_id: generate_sender_id(),
-        data,
-    };
+    let sender_id = generate_sender_id();
+    let mut advertisment = data.map(|data| Advertisment { data, sender_id });
     let mut is_advertising = false;
 
     let ticker = tick(ADVERTISING_INTERVAL);
@@ -59,7 +57,7 @@ fn run_advertiser<T: Transmit>(
                 match command.unwrap() {
                     AdvertiserCommand::Start => is_advertising = true,
                     AdvertiserCommand::Stop => is_advertising = false,
-                    AdvertiserCommand::SetAdvertisment(data) => advertisment.data = data,
+                    AdvertiserCommand::SetAdvertisment(data) => advertisment = Some(Advertisment { data, sender_id }),
                     AdvertiserCommand::Exit => break,
                 }
             },
@@ -68,12 +66,14 @@ fn run_advertiser<T: Transmit>(
                     continue;
                 }
 
-                client.send_channel().send(advertisment.clone()).unwrap();
+                if let Some(advertisment) = &advertisment {
+                    client.send_channel().send(advertisment.clone()).expect("The advertiser's client should always be able to send.");
+                }
             },
             recv(client.receive_channel()) -> data => {
                 let (address, received_advertisment) = data.unwrap();
 
-                if received_advertisment.sender_id == advertisment.sender_id {
+                if received_advertisment.sender_id == sender_id {
                     continue;
                 }
 
@@ -84,7 +84,7 @@ fn run_advertiser<T: Transmit>(
 }
 
 impl<T: Transmit> Advertiser<T> {
-    pub fn new(advertisment: T, multicast_ip: [u8; 4], port: u16) -> Result<Self> {
+    pub fn new(advertisment: Option<T>, multicast_ip: [u8; 4], port: u16) -> Result<Self> {
         let client: Client<Advertisment<T>> = Client::new_udp_multicast_client(multicast_ip, port)?;
 
         let (control_channel_tx, control_channel_rx) = unbounded::<AdvertiserCommand<T>>();

@@ -10,13 +10,14 @@ use crate::backup::save_state_to_file;
 use crate::elevator::{
     controller::{Direction, ElevatorEvent},
     inputs::create_call_button_channel,
-    lights::{set_hall_lights, set_cab_lights},
+    lights::{set_cab_lights, set_hall_lights},
 };
 use crate::network::Node;
 use crate::requests::requests::Requests;
 use crate::worldview::{HallRequestState, Worldview};
 
 pub fn run_dispatcher(
+    node: Node<Worldview>,
     inital_worldview: Worldview,
     elevio_driver: &Elevator,
     elevator_command_tx: Sender<Requests>,
@@ -25,7 +26,6 @@ pub fn run_dispatcher(
     let mut global_worldview = Worldview::new(String::from(""), elevio_driver.num_floors as usize);
     let mut local_worldview = inital_worldview;
     let deactivation_ticker = tick(Duration::from_millis(1000));
-    let node = Node::<Worldview>::new();
     let call_button_channel = create_call_button_channel(elevio_driver);
 
     loop {
@@ -163,7 +163,7 @@ pub fn run_dispatcher(
                             debug!("Cleared down.");
                             local_worldview.hall_requests[floor].down = HallRequestState::Inactive;
                         }
-    
+
                         //Send the updated order list to the elevator controller
                         let requests = local_worldview.requests_for_local_elevator();
                         elevator_command_tx.send(requests).unwrap();

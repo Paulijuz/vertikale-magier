@@ -1,13 +1,9 @@
-use backup::load_state_from_file;
 use clap::Parser;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
-use elevator::controller::controller_loop;
 use env_logger;
 use log::{info, LevelFilter};
-use request_dispatch::run_dispatcher;
 use std::{process::exit, thread::spawn};
-use worldview::Worldview;
 
 mod backup;
 mod elevator;
@@ -41,35 +37,43 @@ fn main() {
     let args = Args::parse();
 
     let elevio_driver =
-        elevio::elev::Elevator::init(&format!("localhost:{}", args.port), args.num_floors as u8).unwrap();
-
-    let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
+        elevio::elev::Elevator::init(&format!("localhost:{}", args.port), args.num_floors as u8)
+            .unwrap();
 
     // Load state from backup if available
-    let inital_worldview = match load_state_from_file("backup.json") {
-        Ok(mut states) => {
+    let inital_worldview = match backup::load_state_from_file("backup.json") {
+        Ok(worldview) => {
             info!("Loaded backup.");
-            states.name = name;
-            states
+            worldview
         }
         Err(_) => {
             info!("No backup found.");
-            Worldview::new(name, args.num_floors)
+            let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
+            worldview::Worldview::new(name, args.num_floors)
         }
     };
 
-    let (command_channel_tx, command_channel_rx) = cbc::unbounded();
+    let node = network::Node::<worldview::Worldview>::new(inital_worldview.name.clone());
+
+    let (elevator_command_tx, elevator_command_rx) = cbc::unbounded();
     let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();
 
     {
         let elevio_driver = elevio_driver.clone();
-        spawn(move || controller_loop(&elevio_driver, command_channel_rx, elevator_event_tx));
+        spawn(move || {
+            elevator::controller::controller_loop(
+                &elevio_driver,
+                elevator_command_rx,
+                elevator_event_tx,
+            )
+        });
     }
 
-    run_dispatcher(
+    request_dispatch::run_dispatcher(
+        node,
         inital_worldview,
         &elevio_driver,
-        command_channel_tx,
+        elevator_command_tx,
         elevator_event_rx,
     );
 

@@ -4,7 +4,10 @@ use std::{collections::HashMap, fmt, time::SystemTime};
 
 use crate::{
     elevator::controller::{Behaviour, Direction, ElevatorState},
-    requests::{assigner::{self, HraBehaviour, HraDirection, HraState}, requests::Requests},
+    requests::{
+        assigner::{self, HraBehaviour, HraDirection, HraState},
+        requests::Requests,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -160,12 +163,16 @@ impl Worldview {
     }
     // Velger beste heis for en bestilling
     pub fn assign_requests(&mut self) {
-        let hall_requests = self.hall_requests.iter().map(|request| {
-            (
-                request.up != HallRequestState::Inactive,
-                request.down != HallRequestState::Inactive,
-            )
-        }).collect();
+        let hall_requests = self
+            .hall_requests
+            .iter()
+            .map(|request| {
+                (
+                    request.up != HallRequestState::Inactive,
+                    request.down != HallRequestState::Inactive,
+                )
+            })
+            .collect();
         let states = self
             .elevators
             .iter()

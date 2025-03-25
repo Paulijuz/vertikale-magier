@@ -41,11 +41,11 @@ type HraOutput = HashMap<String, Vec<(bool, bool, bool)>>;
 
 pub fn run_hall_request_assigner(
     hall_requests: Vec<(bool, bool)>,
-    states: HashMap<String, HraState>
+    states: HashMap<String, HraState>,
 ) -> Result<HraOutput, String> {
     let input_struct = HraInput {
         hall_requests,
-        states
+        states,
     };
 
     let input_json = serde_json::to_string(&input_struct).unwrap();

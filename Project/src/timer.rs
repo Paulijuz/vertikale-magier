@@ -1,6 +1,9 @@
 use crossbeam_channel as cbc;
 use std::{
-    sync::{ atomic::{AtomicBool, AtomicU32, Ordering}, Arc },
+    sync::{
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc,
+    },
     thread::{sleep, spawn},
     time::Duration,
 };
@@ -28,7 +31,7 @@ impl Timer {
     }
 
     /// Starts the timer.
-    /// 
+    ///
     /// **Note:** Calling start on an already started timer will have no effect.
     pub fn start(&mut self) {
         if self.is_active.fetch_or(true, Ordering::Relaxed) {
@@ -43,7 +46,7 @@ impl Timer {
 
         spawn(move || {
             sleep(duration);
-            
+
             if start_iteration == iteration.load(Ordering::Relaxed) {
                 is_active.store(false, Ordering::Relaxed);
                 timeout_channel_tx.send(()).unwrap();

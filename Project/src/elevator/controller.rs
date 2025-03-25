@@ -7,7 +7,7 @@ use std::time::Duration;
 use super::inputs::{
     create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel,
 };
-use crate::{elevator::lights::set_state_lights, requests::requests::Requests, timer::Timer};
+use crate::{elevator::lights::set_state_lights, requests::local::LocalRequests, timer::Timer};
 
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 
@@ -42,7 +42,11 @@ pub enum ElevatorEvent {
 
 /// Returns the next direction and behaviour the elevator should move/be in based on
 /// current floor, direciton and requests.
-fn next_state(floor: usize, direction: Direction, requests: &Requests) -> (Direction, Behaviour) {
+fn next_state(
+    floor: usize,
+    direction: Direction,
+    requests: &LocalRequests,
+) -> (Direction, Behaviour) {
     match direction {
         Direction::Up => {
             if requests.up_at_floor(floor) {
@@ -86,7 +90,7 @@ fn next_state(floor: usize, direction: Direction, requests: &Requests) -> (Direc
 
 /// Returns wheter or not the elevator should stop based on the current
 /// floor, direciton and requests.
-fn should_stop(floor: usize, direction: Direction, requests: &Requests) -> bool {
+fn should_stop(floor: usize, direction: Direction, requests: &LocalRequests) -> bool {
     match direction {
         Direction::Down => requests.down_at_floor(floor) || !requests.any_below_floor(floor),
         Direction::Up => requests.up_at_floor(floor) || !requests.any_above_floor(floor),
@@ -94,7 +98,7 @@ fn should_stop(floor: usize, direction: Direction, requests: &Requests) -> bool 
     }
 }
 
-fn should_instantly_clear(floor: usize, direction: Direction, requests: &Requests) -> bool {
+fn should_instantly_clear(floor: usize, direction: Direction, requests: &LocalRequests) -> bool {
     match direction {
         Direction::Down => requests.down_at_floor(floor),
         Direction::Up => requests.up_at_floor(floor),
@@ -152,7 +156,7 @@ fn close_door(elevio_driver: &elevio::elev::Elevator) -> Result<(), ()> {
 /// **Note:** This function blocks execution.
 pub fn controller_loop(
     elevio_driver: &elevio::elev::Elevator,
-    elevator_command_rx: cbc::Receiver<Requests>,
+    elevator_command_rx: cbc::Receiver<LocalRequests>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
     let floor_sensor_channel = create_floor_sensor_channel(elevio_driver);
@@ -161,7 +165,7 @@ pub fn controller_loop(
 
     let mut door_timer = Timer::new(DOOR_OPEN_DURATION);
 
-    let mut requests = Requests::new(elevio_driver.num_floors as usize);
+    let mut requests = LocalRequests::new(elevio_driver.num_floors as usize);
     let mut state = ElevatorState {
         behaviour: Behaviour::Idle,
         direction: Direction::Stopped,

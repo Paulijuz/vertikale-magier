@@ -1,7 +1,7 @@
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 
 use crate::{
-    requests::requests::Requests,
+    requests::{global::GlobalRequests, local::LocalRequests},
     worldview::{HallRequest, HallRequestState},
 };
 
@@ -12,7 +12,7 @@ pub fn set_state_lights(elevio_driver: &Elevator, state: ElevatorState) {
     elevio_driver.door_light(state.behaviour == Behaviour::DoorOpen);
 }
 
-pub fn set_cab_lights(elevio_driver: &Elevator, requests: &Requests) {
+pub fn set_cab_lights(elevio_driver: &Elevator, requests: &LocalRequests) {
     for (floor, (_, &cab)) in requests.iter().enumerate() {
         let floor = floor as u8;
 
@@ -20,7 +20,7 @@ pub fn set_cab_lights(elevio_driver: &Elevator, requests: &Requests) {
     }
 }
 
-pub fn set_hall_lights(elevio_driver: &Elevator, requests: &Vec<HallRequest>) {
+pub fn set_hall_lights(elevio_driver: &Elevator, requests: &GlobalRequests) {
     for (floor, hall_request) in requests.iter().enumerate() {
         let floor = floor as u8;
 

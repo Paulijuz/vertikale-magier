@@ -1,2 +1,3 @@
 pub mod assigner;
-pub mod requests;
+pub mod global;
+pub mod local;

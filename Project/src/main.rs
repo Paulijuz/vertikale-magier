@@ -53,7 +53,7 @@ fn main() {
         }
     };
 
-    let node = network::Node::<worldview::Worldview>::new(inital_worldview.name.clone());
+    let node = network::Node::new(inital_worldview.name.clone());
 
     let (elevator_command_tx, elevator_command_rx) = cbc::unbounded();
     let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();

@@ -1,48 +1,66 @@
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info, warn};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     time::{Duration, SystemTime},
 };
 
-use crate::backup::save_state_to_file;
 use crate::elevator::{
     controller::{Direction, ElevatorEvent},
     inputs::create_call_button_channel,
     lights::{set_cab_lights, set_hall_lights},
 };
 use crate::network::Node;
-use crate::requests::requests::Requests;
+use crate::requests::local::LocalRequests;
 use crate::worldview::{HallRequestState, Worldview};
+use crate::{
+    backup::save_state_to_file,
+    elevator::controller::ElevatorState,
+    requests::global::{GlobalRequestState, GlobalRequests},
+};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum DispatcherMessage {
+    HallUpRequest((usize, GlobalRequestState<String>)),
+    HallDownRequest((usize, GlobalRequestState<String>)),
+    CabRequest((String, usize, GlobalRequestState<String>)),
+    ElevatorState((String, ElevatorState)),
+}
 
 pub fn run_dispatcher(
-    node: Node<Worldview>,
+    node: Node<DispatcherMessage>,
     inital_worldview: Worldview,
     elevio_driver: &Elevator,
-    elevator_command_tx: Sender<Requests>,
+    elevator_command_tx: Sender<LocalRequests>,
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
-    let mut global_worldview = Worldview::new(String::from(""), elevio_driver.num_floors as usize);
-    let mut local_worldview = inital_worldview;
+    // let mut global_worldview = Worldview::new(String::from(""), elevio_driver.num_floors as usize);
+    // let mut local_worldview = inital_worldview;
     let deactivation_ticker = tick(Duration::from_millis(1000));
     let call_button_channel = create_call_button_channel(elevio_driver);
+
+    let elevator_states = HashMap::<String, ElevatorState>::new();
+    let global_requests = GlobalRequests::new(elevio_driver.num_floors as usize);
 
     loop {
         select! {
             recv(node.from_master_channel()) -> message => {
-                global_worldview = message.unwrap();
+                let message = message.unwrap();
+
+                let DispatcherMessage::HallRequest(new_request) = message else {
+                    panic!("fuck");
+                };
 
                 info!("Received state from master \"{}\":\n{}", global_worldview.name, global_worldview);
 
-                // Send new request list to elevator controller and light controller.
-                local_worldview.sync_with_master(global_worldview.clone());
-                let requests = local_worldview.requests_for_local_elevator();
-
                 set_cab_lights(&elevio_driver, &requests);
-                set_hall_lights(&elevio_driver, &local_worldview.hall_requests);
+                set_hall_lights(&elevio_driver, &global_requests);
 
                 elevator_command_tx.send(requests).unwrap();
+
+                // TODO: Proper acking
 
                 if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
                     node.to_master_channel().send(local_worldview.clone()).unwrap();

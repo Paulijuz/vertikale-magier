@@ -6,7 +6,7 @@ use crate::{
     elevator::controller::{Behaviour, Direction, ElevatorState},
     requests::{
         assigner::{self, HraBehaviour, HraDirection, HraState},
-        requests::Requests,
+        local::LocalRequests,
     },
 };
 
@@ -200,8 +200,8 @@ impl Worldview {
             }
         }
     }
-    pub fn requests_for_elevator(&self, name: &String) -> Option<Requests> {
-        let mut requests = Requests::new(self.num_floors);
+    pub fn requests_for_elevator(&self, name: &String) -> Option<LocalRequests> {
+        let mut requests = LocalRequests::new(self.num_floors);
 
         for (floor, cab_request) in self.elevators.get(name)?.cab_requests.iter().enumerate() {
             if *cab_request {
@@ -221,9 +221,9 @@ impl Worldview {
 
         return Some(requests);
     }
-    pub fn requests_for_local_elevator(&self) -> Requests {
+    pub fn requests_for_local_elevator(&self) -> LocalRequests {
         self.requests_for_elevator(&self.name)
-            .unwrap_or(Requests::new(self.num_floors))
+            .unwrap_or(LocalRequests::new(self.num_floors))
     }
     pub fn set_local_elevator_state(&mut self, local_elevator_state: ElevatorView) {
         self.elevators

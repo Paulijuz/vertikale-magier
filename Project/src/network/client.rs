@@ -34,7 +34,7 @@ pub enum Message<T> {
 }
 
 fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAddrV4, T)>) {
-    let mut last_received: Instant = Instant::now();
+    // let mut last_received: Instant = Instant::now();
     let mut parse_buffer: String = String::new();
 
     loop {
@@ -61,7 +61,7 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             match serde_json::from_str(&drain) {
                 //Splitter mellom at det er data eller heartbeat
                 Ok(Message::Data(data)) => receive_channel_tx.send((address, data)).unwrap(),
-                Ok(Message::Heartbeat) => last_received = Instant::now(),
+                Ok(Message::Heartbeat) => {},
                 Err(error) => {
                     let data = String::from_utf8_lossy(&receive_buffer[..count]);
                     warn!(
@@ -72,13 +72,13 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             }
         }
 
-        if last_received.elapsed() > CONNECTION_TIMEOUT {
-            error!(
-                "No heartbeats received for {} ms, it's dead.",
-                last_received.elapsed().as_millis()
-            );
-            break;
-        }
+        // if last_received.elapsed() > CONNECTION_TIMEOUT {
+        //     error!(
+        //         "No heartbeats received for {} ms, it's dead.",
+        //         last_received.elapsed().as_millis()
+        //     );
+        //     break;
+        // }
     }
 }
 
@@ -145,6 +145,7 @@ impl<T: Transmit> Client<T> {
 
         let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
         socket.connect(&address.into())?;
+        socket.set_read_timeout(Some(CONNECTION_TIMEOUT));
 
         Client::new(socket, address)
     }

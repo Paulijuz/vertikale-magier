@@ -40,8 +40,20 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
     loop {
         let mut receive_buffer = [0; BUFFER_SIZE];
 
-        let (Ok(address), Ok(count)) = (socket.peek_sender(), socket.read(&mut receive_buffer)) else {
-            break;
+        let address = match socket.peek_sender() {
+            Ok(address) => address,
+            Err(error) => {
+                warn!("Could not peek address from socket: {error}");
+                break;
+            }
+        };
+
+        let count = match socket.read(&mut receive_buffer) {
+            Ok(count) => count,
+            Err(error) => {
+                warn!("Could not read from socket: {error}");
+                break;
+            }
         };
 
         if count == 0 {
@@ -61,7 +73,7 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             match serde_json::from_str(&drain) {
                 //Splitter mellom at det er data eller heartbeat
                 Ok(Message::Data(data)) => receive_channel_tx.send((address, data)).unwrap(),
-                Ok(Message::Heartbeat) => {},
+                Ok(Message::Heartbeat) => {}
                 Err(error) => {
                     let data = String::from_utf8_lossy(&receive_buffer[..count]);
                     warn!(
@@ -103,9 +115,13 @@ fn send<T: Transmit>(socket: Socket, send_channel_rx: Receiver<T>, send_address:
 
         buffer.extend(DELIMITER.as_bytes());
 
-        if socket.send_to(&buffer, &send_address.into()).is_err() {
-            warn!("Could not send on socket.");
-            break;
+        if let Err(error) = socket.send_to(&buffer, &send_address.into()) {
+            if error.kind() == ErrorKind::BrokenPipe {
+                error!("Exiting because could not send on socket: {error}");
+                break;
+            } else {
+                warn!("Could not send on socket: {error}");
+            }
         }
     }
 }

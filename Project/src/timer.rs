@@ -1,9 +1,9 @@
 use crossbeam_channel as cbc;
-use std::ops::Add;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
-use std::thread::{sleep, spawn};
-use std::time::Duration;
+use std::{
+    sync::{ atomic::{AtomicBool, AtomicU32, Ordering}, Arc },
+    thread::{sleep, spawn},
+    time::Duration,
+};
 
 #[derive(Debug, Clone)]
 pub struct Timer {
@@ -27,6 +27,9 @@ impl Timer {
         }
     }
 
+    /// Starts the timer.
+    /// 
+    /// **Note:** Calling start on an already started timer will have no effect.
     pub fn start(&mut self) {
         if self.is_active.fetch_or(true, Ordering::Relaxed) {
             return;
@@ -48,11 +51,13 @@ impl Timer {
         });
     }
 
+    /// Stops the timer if it is running. Has no effect otherwise.
     pub fn stop(&mut self) {
         self.iteration.fetch_add(1, Ordering::Relaxed);
         self.is_active.store(false, Ordering::Relaxed);
     }
 
+    /// Forces the timer to begin counting down from the beginning.
     pub fn restart(&mut self) {
         self.stop();
         self.start();

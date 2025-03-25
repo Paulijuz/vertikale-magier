@@ -6,7 +6,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::backup::save_state_to_file;
+use crate::{backup::save_state_to_file, elevator::controller::Behaviour};
 use crate::elevator::{
     controller::{Direction, ElevatorState},
     inputs::create_call_button_channel,
@@ -16,7 +16,6 @@ use crate::network::Node;
 use crate::requests::requests::Requests;
 use crate::worldview::{HallRequestState, Worldview};
 
-/// Starter TCP-server for Master og fordeler innkommende bestillinger
 pub fn run_dispatcher(
     inital_worldview: Worldview,
     elevio_driver: &Elevator,
@@ -69,7 +68,6 @@ pub fn run_dispatcher(
                 } else {
                     info!("New slave connected \"{}\"", slave_name);
                 }
-
 
                 slave_elevator_state.timestamp_last_event = SystemTime::now();
                 master_worldview.elevators.insert(slave_name.clone(), slave_elevator_state);
@@ -159,21 +157,23 @@ pub fn run_dispatcher(
                 local_elevator_state.behaviour = elevator_event.behaviour;
 
                 //Mark order in floor as completed
-                local_elevator_state.cab_requests[elevator_event.floor] = false;
+                if elevator_event.behaviour == Behaviour::DoorOpen {
+                    local_elevator_state.cab_requests[elevator_event.floor] = false;
+    
+                    if elevator_event.direction != Direction::Down {
+                        debug!("Cleared up.");
+                        local_worldview.hall_requests[elevator_event.floor].up = HallRequestState::Inactive;
+                    }
+                    if elevator_event.direction != Direction::Up {
+                        debug!("Cleared down.");
+                        local_worldview.hall_requests[elevator_event.floor].down = HallRequestState::Inactive;
+                    }
 
-                if elevator_event.direction != Direction::Down {
-                    debug!("Cleared up.");
-                    local_worldview.hall_requests[elevator_event.floor].up = HallRequestState::Inactive;
+                    //Send the updated order list to the elevator controller
+                    let requests = local_worldview.requests_for_local_elevator();
+                    elevator_command_tx.send(requests).unwrap();
                 }
-                if elevator_event.direction != Direction::Up {
-                    debug!("Cleared down.");
-                    local_worldview.hall_requests[elevator_event.floor].down = HallRequestState::Inactive;
-                }
-
-                //Send the updated order list to the elevator controller
-                let requests = local_worldview.requests_for_local_elevator();
-                elevator_command_tx.send(requests).unwrap();
-
+                
                 //Inform the master about the new state
                 node.to_master_channel().send(local_worldview.clone()).unwrap();
             },

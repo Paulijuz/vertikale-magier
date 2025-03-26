@@ -73,7 +73,7 @@ pub fn run_dispatcher(
                 master_worldview.elevators.insert(slave_name.clone(), slave_elevator_state);
 
                 if slave_worldview.iteration != master_worldview.iteration {
-                    warn!("Mottok ugyldig verdenssyn. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
+                    warn!("Received invalid worldview. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
                     continue;
                 }
 

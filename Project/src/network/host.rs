@@ -98,6 +98,7 @@ impl<T: Transmit> Host<T> {
 
         let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
         socket.set_reuse_address(true)?;
+        socket.set_nodelay(true)?;
         socket.bind(&address.into())?;
         socket.listen(BACKLOG_SIZE)?;
 

@@ -4,6 +4,8 @@ use log::{debug, error, info, warn};
 use std::{
     collections::HashMap,
     time::{Duration, SystemTime},
+    fs::File,
+    io::Read,
 };
 
 use crate::backup::save_state_to_file;
@@ -16,6 +18,7 @@ use crate::network::Node;
 use crate::requests::requests::Requests;
 use crate::worldview::{HallRequestState, Worldview};
 
+
 pub fn run_dispatcher(
     node: Node<Worldview>,
     inital_worldview: Worldview,
@@ -23,7 +26,7 @@ pub fn run_dispatcher(
     elevator_command_tx: Sender<Requests>,
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
-    let mut global_worldview = Worldview::new(String::from(""), elevio_driver.num_floors as usize);
+    let mut global_worldview = inital_worldview.clone();
     let mut local_worldview = inital_worldview;
     let deactivation_ticker = tick(Duration::from_millis(1000));
     let call_button_channel = create_call_button_channel(elevio_driver);
@@ -35,7 +38,13 @@ pub fn run_dispatcher(
 
                 info!("Received state from master \"{}\":\n{}", global_worldview.name, global_worldview);
 
-                // Send new request list to elevator controller and light controller.
+                // Update local worldview to match the master's iteration
+                if local_worldview.iteration < global_worldview.iteration {
+                    info!("Updating local worldview iteration from {} to {}", local_worldview.iteration, global_worldview.iteration);
+                    local_worldview.iteration = global_worldview.iteration;
+                }
+
+                // Sync with the master and send new requests to the elevator controller
                 local_worldview.sync_with_master(global_worldview.clone());
                 let requests = local_worldview.requests_for_local_elevator();
 

@@ -1,32 +1,38 @@
 use crossbeam_channel as cbc;
-use std::{
-    sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
-        Arc,
-    },
-    thread::{sleep, spawn},
-    time::Duration,
-};
+use log::debug;
+use std::{thread::{spawn, JoinHandle}, time::{Duration, Instant}};
 
-#[derive(Debug, Clone)]
+const DEADLINE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[derive(Debug, Clone, Copy)]
+pub enum TimerCommand {
+    Start,
+    Stop,
+    Exit,
+}
+
+#[derive(Debug)]
 pub struct Timer {
-    timeout_channel_tx: cbc::Sender<()>,
     timeout_channel_rx: cbc::Receiver<()>,
-    duration: Duration,
-    is_active: Arc<AtomicBool>,
-    iteration: Arc<AtomicU32>,
+    timer_command_channel_tx: cbc::Sender<TimerCommand>,
+    thread_handle: Option<JoinHandle<()>>,
 }
 
 impl Timer {
     pub fn new(duration: Duration) -> Timer {
         let (timeout_channel_tx, timeout_channel_rx) = cbc::unbounded::<()>();
+        let (timer_command_channel_tx, timer_command_channel_rx) = cbc::unbounded::<TimerCommand>();
+
+        let thread_handle = spawn(move || timer_loop(
+            duration,
+            timer_command_channel_rx,
+            timeout_channel_tx,
+        ));
 
         Timer {
             timeout_channel_rx,
-            timeout_channel_tx,
-            duration,
-            is_active: Arc::new(AtomicBool::new(false)),
-            iteration: Arc::new(AtomicU32::new(0)),
+            timer_command_channel_tx,
+            thread_handle: Some(thread_handle),
         }
     }
 
@@ -34,30 +40,12 @@ impl Timer {
     ///
     /// **Note:** Calling start on an already started timer will have no effect.
     pub fn start(&mut self) {
-        if self.is_active.fetch_or(true, Ordering::Relaxed) {
-            return;
-        }
-
-        let timeout_channel_tx = self.timeout_channel_tx.clone();
-        let duration = self.duration.clone();
-        let is_active = Arc::clone(&self.is_active);
-        let start_iteration: u32 = self.iteration.load(Ordering::Relaxed);
-        let iteration = self.iteration.clone();
-
-        spawn(move || {
-            sleep(duration);
-
-            if start_iteration == iteration.load(Ordering::Relaxed) {
-                is_active.store(false, Ordering::Relaxed);
-                timeout_channel_tx.send(()).unwrap();
-            }
-        });
+        self.timer_command_channel_tx.send(TimerCommand::Start).unwrap();
     }
 
     /// Stops the timer if it is running. Has no effect otherwise.
     pub fn stop(&mut self) {
-        self.iteration.fetch_add(1, Ordering::Relaxed);
-        self.is_active.store(false, Ordering::Relaxed);
+        self.timer_command_channel_tx.send(TimerCommand::Stop).unwrap();
     }
 
     /// Forces the timer to begin counting down from the beginning.
@@ -66,7 +54,55 @@ impl Timer {
         self.start();
     }
 
+    /// The channel on which timeouts are sent.
     pub fn timeout_channel(&self) -> &cbc::Receiver<()> {
         &self.timeout_channel_rx
+    }
+}
+
+impl Drop for Timer {
+    fn drop(&mut self) {
+        debug!("Shutting dow timer...");
+
+        self.thread_handle
+            .take()
+            .expect("Timer thread handle should be available when dropping.")
+            .join()
+            .expect("Timer thread should join without errors.");
+    
+        debug!("Timer shut down.");
+    }
+}
+
+fn timer_loop(
+    duration: Duration,
+    timer_command_channel_rx: cbc::Receiver<TimerCommand>,
+    timeout_channel_tx: cbc::Sender<()>,
+) { 
+    let ticker = cbc::tick(DEADLINE_POLL_INTERVAL);
+    let mut deadline: Option<Instant> = None;
+
+    loop {
+        cbc::select! {
+            recv(timer_command_channel_rx) -> command => {
+                let command = command.unwrap();
+
+                match command {
+                    TimerCommand::Start if deadline.is_none() => {
+                        deadline = Some(Instant::now() + duration)
+                    },
+                    TimerCommand::Stop => {
+                        deadline = None
+                    },
+                    _ => {},
+                };
+            },
+            recv(ticker) -> _ => {
+                if Some(Instant::now()) > deadline {
+                    deadline = None;
+                    timeout_channel_tx.send(()).unwrap();
+                }
+            }
+        }
     }
 }

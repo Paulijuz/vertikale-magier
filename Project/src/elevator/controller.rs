@@ -146,6 +146,18 @@ fn close_door(elevio_driver: &elevio::elev::Elevator) -> Result<(), ()> {
     Ok(())
 }
 
+//Initialize the elevator position to the bottom floor
+fn initialize_elevator_position(elevio_driver: &elevio::elev::Elevator) {
+    debug!("Initializing elevator position.");
+    elevio_driver.motor_direction(elevio::elev::DIRN_DOWN);
+    while elevio_driver.floor_sensor().is_none() {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    elevio_driver.motor_direction(elevio::elev::DIRN_STOP); 
+    debug!("Elevator initialized at floor {}," , elevio_driver.floor_sensor().unwrap());
+}
+    
+
 /// The main loop for the elevator FSM. It is an event based loop that listen for events from
 /// the elevio driver and the `command_channel`. TODO: Further explain command channel.
 ///
@@ -155,6 +167,9 @@ pub fn controller_loop(
     elevator_command_rx: cbc::Receiver<Requests>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
+
+    initialize_elevator_position(elevio_driver);
+
     let floor_sensor_channel = create_floor_sensor_channel(elevio_driver);
     let obstruction_channel = create_obstruction_channel(elevio_driver);
     let stop_button_channel = create_stop_button_channel(elevio_driver);
@@ -166,7 +181,7 @@ pub fn controller_loop(
         behaviour: Behaviour::Idle,
         direction: Direction::Stopped,
         obstruction: true, // Assume worst until we hear otherwise
-        floor: 0,          // TODO: Make sure the elevator starts in a defined state
+        floor: elevio_driver.floor_sensor().unwrap_or(0) as usize, //Using detected floor
     };
     let mut previous_state: Option<ElevatorState> = None;
 

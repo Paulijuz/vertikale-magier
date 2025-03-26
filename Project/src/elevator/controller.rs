@@ -236,6 +236,8 @@ pub fn controller_loop(
                 if should_stop(state.floor, state.direction, &requests) {
                     elevio_driver.motor_direction(DIRN_STOP);
 
+                    (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
+
                     if requests.any_at_floor(state.floor) {
                         state.behaviour = Behaviour::DoorOpen;
                         open_door(elevio_driver);

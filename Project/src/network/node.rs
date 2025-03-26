@@ -149,7 +149,7 @@ fn run_node<T: Transmit>(
                         // TODO: Find a better way to arbitrate masters.
                         debug!("Connect...");
 
-                        if let Ok(client) = Client::new_tcp_client(address.ip().octets(), advertisment.port) {
+                        if let Ok(client) = Client::new_tcp_client(address.ip().octets(), port) {
                             role = Role::Slave(client);
                             info!("Successfully connected to master \"{}\"! Now slave.", advertisment.name);
                             continue;

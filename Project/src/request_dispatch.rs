@@ -4,8 +4,6 @@ use log::{debug, error, info, warn};
 use std::{
     collections::HashMap,
     time::{Duration, SystemTime},
-    fs::File,
-    io::Read,
 };
 
 use crate::backup::save_state_to_file;
@@ -18,6 +16,7 @@ use crate::network::Node;
 use crate::requests::requests::Requests;
 use crate::worldview::{HallRequestState, Worldview};
 
+const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 
 pub fn run_dispatcher(
     node: Node<Worldview>,
@@ -30,7 +29,6 @@ pub fn run_dispatcher(
     let mut local_worldview = inital_worldview;
     let deactivation_ticker = tick(Duration::from_millis(1000));
     let call_button_channel = create_call_button_channel(elevio_driver);
-    let MOTOR_TIMEOUT = Duration::from_millis(3500);
 
     loop {
         select! {
@@ -38,12 +36,6 @@ pub fn run_dispatcher(
                 global_worldview = message.unwrap();
 
                 info!("Received state from master \"{}\":\n{}", global_worldview.name, global_worldview);
-
-                // Update local worldview to match the master's iteration
-                if local_worldview.iteration < global_worldview.iteration {
-                    info!("Updating local worldview iteration from {} to {}", local_worldview.iteration, global_worldview.iteration);
-                    local_worldview.iteration = global_worldview.iteration;
-                }
 
                 // Sync with the master and send new requests to the elevator controller
                 local_worldview.sync_with_master(global_worldview.clone());
@@ -84,6 +76,7 @@ pub fn run_dispatcher(
 
                 if slave_worldview.iteration != master_worldview.iteration {
                     warn!("Received invalid worldview. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
+                    node.to_slaves_channel().send(global_worldview.clone()).unwrap();
                     continue;
                 }
 
@@ -138,7 +131,7 @@ pub fn run_dispatcher(
                     if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
                         let has_orders = elevator_requests[name].as_ref().unwrap().any_exists();
 
-                        if elevator.active && has_orders && duration > MOTOR_TIMEOUT {
+                        if elevator.active && has_orders && duration > ELEVATOR_TIMEOUT {
                             info!("Deactivating {name} :(");
                             elevator.active = false;
                             changed = true;

@@ -30,6 +30,7 @@ pub fn run_dispatcher(
     let mut local_worldview = inital_worldview;
     let deactivation_ticker = tick(Duration::from_millis(1000));
     let call_button_channel = create_call_button_channel(elevio_driver);
+    let MOTOR_TIMEOUT = Duration::from_millis(3500);
 
     loop {
         select! {
@@ -137,7 +138,7 @@ pub fn run_dispatcher(
                     if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
                         let has_orders = elevator_requests[name].as_ref().unwrap().any_exists();
 
-                        if elevator.active && has_orders && duration > Duration::from_secs(5) {
+                        if elevator.active && has_orders && duration > MOTOR_TIMEOUT {
                             info!("Deactivating {name} :(");
                             elevator.active = false;
                             changed = true;

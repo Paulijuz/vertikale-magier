@@ -215,7 +215,7 @@ impl Worldview {
             }
 
             if hall_request.down == HallRequestState::Assigned(name.clone()) {
-                requests.add(floor, RequestType::Hall(Direction::Up));
+                requests.add(floor, RequestType::Hall(Direction::Down));
             }
         }
 

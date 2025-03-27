@@ -56,24 +56,28 @@ pub fn run_dispatcher(
                 set_cab_lights(&elevio_driver, &requests);
                 set_hall_lights(&elevio_driver, &local_worldview.hall_requests);
 
+                dbg!(&requests);
+
                 for (floor, ((&up, &down), &cab)) in requests.iter().enumerate() {
-                    if up {
-                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
-                    } else {
-                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
-                    }
+                    // if up {
+                    //     elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
+                    // } else {
+                    //     elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
+                    // }
 
                     if down {
+                        debug!("Sending up!");
                         elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
                     } else {
+                        debug!("Clearing up!");
                         elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
                     }
 
-                    if cab {
-                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Cab)).unwrap();
-                    } else {
-                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Cab)).unwrap();
-                    }
+                    // if cab {
+                    //     elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Cab)).unwrap();
+                    // } else {
+                    //     elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Cab)).unwrap();
+                    // }
                 }
 
                 // if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {

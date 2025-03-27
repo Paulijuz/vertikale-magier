@@ -74,21 +74,18 @@ fn main() {
             elevator::controller::controller_loop(
                 &elevio_driver,
                 elevator_command_rx,
-                elevator_command_tx,
                 elevator_event_tx,
             )
         });
     }
 
-    loop {}
-
-    // request_dispatch::run_dispatcher(
-    //     node,
-    //     inital_worldview,
-    //     &elevio_driver,
-    //     elevator_command_tx,
-    //     elevator_event_rx,
-    // );
+    request_dispatch::run_dispatcher(
+        node,
+        inital_worldview,
+        &elevio_driver,
+        elevator_command_tx,
+        elevator_event_rx,
+    );
 
     exit(1);
 }

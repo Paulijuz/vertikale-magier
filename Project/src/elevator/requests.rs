@@ -2,14 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::iter::zip;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RequestDirection {
+pub enum Direction {
     Up,
     Down
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RequestType {
-    Hall(RequestDirection),
+    Hall(Direction),
     Cab,
 }
 
@@ -34,8 +34,8 @@ impl Requests {
     pub fn add(&mut self, floor: usize, request_type: RequestType) {
         match request_type {
             RequestType::Cab => self.cab[floor] = true,
-            RequestType::Hall(RequestDirection::Up) => self.hall_up[floor] = true,
-            RequestType::Hall(RequestDirection::Down) => self.hall_up[floor] = true,
+            RequestType::Hall(Direction::Up) => self.hall_up[floor] = true,
+            RequestType::Hall(Direction::Down) => self.hall_up[floor] = true,
         }
     }
 
@@ -43,8 +43,8 @@ impl Requests {
     pub fn clear(&mut self, floor: usize, request_type: RequestType) {
         match request_type {
             RequestType::Cab => self.cab[floor] = false,
-            RequestType::Hall(RequestDirection::Up) => self.hall_up[floor] = false,
-            RequestType::Hall(RequestDirection::Down) => self.hall_up[floor] = false,
+            RequestType::Hall(Direction::Up) => self.hall_up[floor] = false,
+            RequestType::Hall(Direction::Down) => self.hall_up[floor] = false,
         }
     }
 

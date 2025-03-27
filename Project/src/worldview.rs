@@ -4,8 +4,8 @@ use std::{collections::HashMap, fmt, time::SystemTime};
 
 use crate::{
     elevator::{
-        controller::{Behaviour, Direction, ElevatorState},
-        requests::{RequestDirection, RequestType, Requests},
+        controller::{Behaviour, ElevatorState},
+        requests::{Direction, RequestType, Requests},
     },
     hall_request_assigner::{run_hall_request_assigner, HraBehaviour, HraDirection, HraState},
 };
@@ -28,9 +28,9 @@ impl From<&ElevatorView> for HraState {
             },
             floor: elevator_view.state.floor,
             direction: match elevator_view.state.direction {
-                Direction::Down => HraDirection::Down,
-                Direction::Stopped => HraDirection::Stop,
-                Direction::Up => HraDirection::Up,
+                Some(Direction::Down) => HraDirection::Down,
+                None => HraDirection::Stop,
+                Some(Direction::Up) => HraDirection::Up,
             },
             cab_requests: elevator_view.cab_requests.clone(),
         }
@@ -211,11 +211,11 @@ impl Worldview {
 
         for (floor, hall_request) in self.hall_requests.iter().enumerate() {
             if hall_request.up == HallRequestState::Assigned(name.clone()) {
-                requests.add(floor, RequestType::Hall(RequestDirection::Up));
+                requests.add(floor, RequestType::Hall(Direction::Up));
             }
 
             if hall_request.down == HallRequestState::Assigned(name.clone()) {
-                requests.add(floor, RequestType::Hall(RequestDirection::Up));
+                requests.add(floor, RequestType::Hall(Direction::Up));
             }
         }
 
@@ -237,7 +237,7 @@ impl Worldview {
                     active: true,
                     cab_requests: vec![false; self.num_floors],
                     state: ElevatorState {
-                        direction: Direction::Stopped,
+                        direction: None,
                         behaviour: Behaviour::Idle,
                         obstruction: false,
                         floor: 0,

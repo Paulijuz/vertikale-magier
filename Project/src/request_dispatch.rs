@@ -7,13 +7,13 @@ use std::{
 };
 
 use crate::elevator::{
-    controller::{Direction, ElevatorEvent},
+    controller::{ElevatorCommand, ElevatorEvent},
     inputs::create_call_button_channel,
-    lights::{set_cab_lights, set_hall_lights},
+    lights::{set_cab_lights, set_hall_lights}, requests::{Direction, RequestType},
 };
 use crate::network::Node;
 use crate::worldview::{HallRequestState, Worldview};
-use crate::{backup::save_state_to_file, elevator::requests::Requests};
+use crate::backup::save_state_to_file;
 
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 
@@ -21,7 +21,7 @@ pub fn run_dispatcher(
     node: Node<Worldview>,
     inital_worldview: Worldview,
     elevio_driver: &Elevator,
-    elevator_command_tx: Sender<Requests>,
+    elevator_command_tx: Sender<ElevatorCommand>,
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
     let mut global_worldview = inital_worldview.clone();
@@ -43,7 +43,25 @@ pub fn run_dispatcher(
                 set_cab_lights(&elevio_driver, &requests);
                 set_hall_lights(&elevio_driver, &local_worldview.hall_requests);
 
-                elevator_command_tx.send(requests).unwrap();
+                for (floor, ((&up, &down), &cab)) in requests.iter().enumerate() {
+                    if up { 
+                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
+                    } else {
+                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
+                    }
+
+                    if down {
+                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
+                    } else {
+                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
+                    }
+
+                    if cab {
+                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Cab)).unwrap();
+                    } else {
+                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Cab)).unwrap();
+                    }
+                }
 
                 if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
                     node.to_master_channel().send(local_worldview.clone()).unwrap();
@@ -154,21 +172,12 @@ pub fn run_dispatcher(
                 let local_elevator = local_worldview.local_elevator_state();
 
                 match elevator_event {
-                    ElevatorEvent::FloorCleared((floor, direction)) => {
-                        local_elevator.cab_requests[floor] = false;
-
-                        if direction != Direction::Down {
-                            debug!("Cleared up.");
-                            local_worldview.hall_requests[floor].up = HallRequestState::Inactive;
+                    ElevatorEvent::RequestCleared(floor, request_type) => {
+                        match request_type {
+                            RequestType::Cab => local_elevator.cab_requests[floor] = false,
+                            RequestType::Hall(Direction::Up) => local_worldview.hall_requests[floor].up = HallRequestState::Inactive,
+                            RequestType::Hall(Direction::Down) => local_worldview.hall_requests[floor].down = HallRequestState::Inactive,
                         }
-                        if direction != Direction::Up {
-                            debug!("Cleared down.");
-                            local_worldview.hall_requests[floor].down = HallRequestState::Inactive;
-                        }
-
-                        //Send the updated order list to the elevator controller
-                        let requests = local_worldview.requests_for_local_elevator();
-                        elevator_command_tx.send(requests).unwrap();
                     },
                     ElevatorEvent::StateUpdated(state) => {
                         local_elevator.state = state;

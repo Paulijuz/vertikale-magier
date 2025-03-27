@@ -7,16 +7,36 @@ use std::time::Duration;
 use super::inputs::{
     create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel,
 };
-use crate::{elevator::lights::set_state_lights, requests::local::LocalRequests, timer::Timer};
+use crate::{requests::local::LocalRequests, timer::Timer};
 
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Direction {
+pub enum ElevatorDirection {
     Up,
     Down,
     Stopped,
 }
+
+// impl From<ElevatorDirection> for Option<RequestDirection> {
+//     fn from(direction: ElevatorDirection) -> Self {
+//         match direction {
+//             ElevatorDirection::Down => Some(RequestDirection::Down),
+//             ElevatorDirection::Up => Some(RequestDirection::Up),
+//             ElevatorDirection::Stopped => None,
+//         }
+//     }
+// }
+
+// impl ElevatorDirection {
+//     fn reverse(self) -> Self {
+//         match self {
+//             Self::Down => Self::Up,
+//             Self::Stopped => Self::Stopped,
+//             Self::Up => Self::Down,
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Behaviour {
@@ -28,7 +48,7 @@ pub enum Behaviour {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ElevatorState {
-    pub direction: Direction,
+    pub direction: ElevatorDirection,
     pub behaviour: Behaviour,
     pub obstruction: bool,
     pub floor: usize, // Floor is usize as it's primaraly used for indexing.
@@ -37,52 +57,52 @@ pub struct ElevatorState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ElevatorEvent {
     StateUpdated(ElevatorState),
-    FloorCleared((usize, Direction)),
+    FloorServiced(usize, ElevatorDirection),
 }
 
 /// Returns the next direction and behaviour the elevator should move/be in based on
 /// current floor, direciton and requests.
 fn next_state(
     floor: usize,
-    direction: Direction,
+    direction: ElevatorDirection,
     requests: &LocalRequests,
-) -> (Direction, Behaviour) {
+) -> (ElevatorDirection, Behaviour) {
     match direction {
-        Direction::Up => {
+        ElevatorDirection::Up => {
             if requests.up_at_floor(floor) {
-                (Direction::Up, Behaviour::DoorOpen)
+                (ElevatorDirection::Up, Behaviour::DoorOpen)
             } else if requests.any_above_floor(floor) {
-                (Direction::Up, Behaviour::Moving)
+                (ElevatorDirection::Up, Behaviour::Moving)
             } else if requests.any_at_floor(floor) {
-                (Direction::Down, Behaviour::DoorOpen)
+                (ElevatorDirection::Down, Behaviour::DoorOpen)
             } else if requests.any_below_floor(floor) {
-                (Direction::Down, Behaviour::Moving)
+                (ElevatorDirection::Down, Behaviour::Moving)
             } else {
-                (Direction::Stopped, Behaviour::Idle)
+                (ElevatorDirection::Stopped, Behaviour::Idle)
             }
         }
-        Direction::Down => {
+        ElevatorDirection::Down => {
             if requests.any_below_floor(floor) {
-                (Direction::Down, Behaviour::Moving)
+                (ElevatorDirection::Down, Behaviour::Moving)
             } else if requests.down_at_floor(floor) {
-                (Direction::Down, Behaviour::DoorOpen)
+                (ElevatorDirection::Down, Behaviour::DoorOpen)
             } else if requests.any_at_floor(floor) {
-                (Direction::Up, Behaviour::DoorOpen)
+                (ElevatorDirection::Up, Behaviour::DoorOpen)
             } else if requests.any_above_floor(floor) {
-                (Direction::Up, Behaviour::Moving)
+                (ElevatorDirection::Up, Behaviour::Moving)
             } else {
-                (Direction::Stopped, Behaviour::Idle)
+                (ElevatorDirection::Stopped, Behaviour::Idle)
             }
         }
-        Direction::Stopped => {
+        ElevatorDirection::Stopped => {
             if requests.any_at_floor(floor) {
-                (Direction::Stopped, Behaviour::DoorOpen)
+                (ElevatorDirection::Stopped, Behaviour::DoorOpen)
             } else if requests.any_above_floor(floor) {
-                (Direction::Up, Behaviour::Moving)
+                (ElevatorDirection::Up, Behaviour::Moving)
             } else if requests.any_below_floor(floor) {
-                (Direction::Down, Behaviour::Moving)
+                (ElevatorDirection::Down, Behaviour::Moving)
             } else {
-                (Direction::Stopped, Behaviour::Idle)
+                (ElevatorDirection::Stopped, Behaviour::Idle)
             }
         }
     }
@@ -90,29 +110,29 @@ fn next_state(
 
 /// Returns wheter or not the elevator should stop based on the current
 /// floor, direciton and requests.
-fn should_stop(floor: usize, direction: Direction, requests: &LocalRequests) -> bool {
+fn should_stop(floor: usize, direction: ElevatorDirection, requests: &LocalRequests) -> bool {
     match direction {
-        Direction::Down => requests.down_at_floor(floor) || !requests.any_below_floor(floor),
-        Direction::Up => requests.up_at_floor(floor) || !requests.any_above_floor(floor),
-        Direction::Stopped => true,
+        ElevatorDirection::Down => requests.down_at_floor(floor) || !requests.any_below_floor(floor),
+        ElevatorDirection::Up => requests.up_at_floor(floor) || !requests.any_above_floor(floor),
+        ElevatorDirection::Stopped => true,
     }
 }
 
-fn should_instantly_clear(floor: usize, direction: Direction, requests: &LocalRequests) -> bool {
+fn should_instantly_clear(floor: usize, direction: ElevatorDirection, requests: &LocalRequests) -> bool {
     match direction {
-        Direction::Down => requests.down_at_floor(floor),
-        Direction::Up => requests.up_at_floor(floor),
-        Direction::Stopped => requests.any_at_floor(floor),
+        ElevatorDirection::Down => requests.down_at_floor(floor),
+        ElevatorDirection::Up => requests.up_at_floor(floor),
+        ElevatorDirection::Stopped => requests.any_at_floor(floor),
     }
 }
 
 /// Starts the motor in the given direction.
 ///
 /// **Note:** Trying to start the motor in the direction `Stopped` will return an error.
-fn start_motor(elevio_driver: &elevio::elev::Elevator, direction: Direction) -> Result<(), ()> {
+fn start_motor(elevio_driver: &elevio::elev::Elevator, direction: ElevatorDirection) -> Result<(), ()> {
     match direction {
-        Direction::Up => elevio_driver.motor_direction(elevio::elev::DIRN_UP),
-        Direction::Down => elevio_driver.motor_direction(elevio::elev::DIRN_DOWN),
+        ElevatorDirection::Up => elevio_driver.motor_direction(elevio::elev::DIRN_UP),
+        ElevatorDirection::Down => elevio_driver.motor_direction(elevio::elev::DIRN_DOWN),
         _ => return Err(()),
     }
 
@@ -168,7 +188,7 @@ pub fn controller_loop(
     let mut requests = LocalRequests::new(elevio_driver.num_floors as usize);
     let mut state = ElevatorState {
         behaviour: Behaviour::Idle,
-        direction: Direction::Stopped,
+        direction: ElevatorDirection::Stopped,
         obstruction: true, // Assume worst until we hear otherwise
         floor: 0,          // TODO: Make sure the elevator starts in a defined state
     };
@@ -181,7 +201,6 @@ pub fn controller_loop(
             elevator_event_tx
                 .send(ElevatorEvent::StateUpdated(state))
                 .unwrap();
-            set_state_lights(elevio_driver, state);
         }
 
         cbc::select! {
@@ -192,7 +211,7 @@ pub fn controller_loop(
                 match state.behaviour {
                     Behaviour::DoorOpen => {
                         if should_instantly_clear(state.floor, state.direction, &requests) {
-                            elevator_event_tx.send(ElevatorEvent::FloorCleared((state.floor, state.direction))).unwrap();
+                            elevator_event_tx.send(ElevatorEvent::FloorServiced(state.floor, state.direction)).unwrap();
                             door_timer.restart();
                         }
                     },
@@ -202,7 +221,7 @@ pub fn controller_loop(
                         match state.behaviour {
                             Behaviour::DoorOpen => {
                                 open_door(elevio_driver);
-                                elevator_event_tx.send(ElevatorEvent::FloorCleared((state.floor, state.direction))).unwrap();
+                                elevator_event_tx.send(ElevatorEvent::FloorServiced(state.floor, state.direction)).unwrap();
                                 door_timer.start();
                             },
                             Behaviour::Moving => {
@@ -218,6 +237,8 @@ pub fn controller_loop(
                 state.floor = floor.unwrap() as usize;
                 debug!("Detected floor: {}", state.floor);
 
+                elevio_driver.floor_indicator(state.floor as u8);
+
                 if state.behaviour != Behaviour::Moving {
                     continue;
                 }
@@ -228,7 +249,7 @@ pub fn controller_loop(
                     if requests.any_at_floor(state.floor) {
                         state.behaviour = Behaviour::DoorOpen;
                         open_door(elevio_driver);
-                        elevator_event_tx.send(ElevatorEvent::FloorCleared((state.floor, state.direction))).unwrap();
+                        elevator_event_tx.send(ElevatorEvent::FloorServiced(state.floor, state.direction)).unwrap();
                         door_timer.start();
                     } else {
                         state.behaviour = Behaviour::Idle;
@@ -269,7 +290,7 @@ pub fn controller_loop(
                 match state.behaviour {
                     Behaviour::DoorOpen => {
                         open_door(elevio_driver);
-                        elevator_event_tx.send(ElevatorEvent::FloorCleared((state.floor, state.direction))).unwrap();
+                        elevator_event_tx.send(ElevatorEvent::FloorServiced(state.floor, state.direction)).unwrap();
                         door_timer.start();
                     },
                     Behaviour::Moving => {

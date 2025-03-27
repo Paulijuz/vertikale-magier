@@ -1,37 +1,27 @@
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
-use log::{debug, error, info, warn};
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    time::{Duration, SystemTime},
-};
+use log::{warn, info};
+use std::{collections::HashMap, time::Duration};
 
-use crate::elevator::{
-    controller::{Direction, ElevatorEvent},
+use crate::{elevator::{
+    controller::{ElevatorDirection, ElevatorEvent, ElevatorState},
     inputs::create_call_button_channel,
     lights::{set_cab_lights, set_hall_lights},
-};
+}, message::Message, requests::{cab::CabRequests, hall::{HallRequestDirection, HallRequests}}};
 use crate::network::Node;
 use crate::requests::local::LocalRequests;
-use crate::worldview::{HallRequestState, Worldview};
-use crate::{
-    backup::save_state_to_file,
-    elevator::controller::ElevatorState,
-    requests::global::{GlobalRequestState, GlobalRequests},
-};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum DispatcherMessage {
-    HallUpRequest((usize, GlobalRequestState<String>)),
-    HallDownRequest((usize, GlobalRequestState<String>)),
-    CabRequest((String, usize, GlobalRequestState<String>)),
-    ElevatorState((String, ElevatorState)),
-}
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// enum DispatcherMessage {
+//     NewRequest((usize, /* TODO: Request Type */)),
+//     DispatchRequest((u32, usize)),
+//     ClearRequest((u32, usize, /* TODO: Direction */)),
+//     ElevatorState(ElevatorState),
+// }
 
 pub fn run_dispatcher(
-    node: Node<DispatcherMessage>,
-    inital_worldview: Worldview,
+    name: String,
+    node: Node<Message>,
     elevio_driver: &Elevator,
     elevator_command_tx: Sender<LocalRequests>,
     elevator_event_rx: Receiver<ElevatorEvent>,
@@ -41,180 +31,149 @@ pub fn run_dispatcher(
     let deactivation_ticker = tick(Duration::from_millis(1000));
     let call_button_channel = create_call_button_channel(elevio_driver);
 
-    let elevator_states = HashMap::<String, ElevatorState>::new();
-    let global_requests = GlobalRequests::new(elevio_driver.num_floors as usize);
+    let mut elevator_states = HashMap::<String, ElevatorState>::new();
+    let mut cab_requests = CabRequests::new(elevio_driver.num_floors as usize);
+    let mut hall_requests = HallRequests::new(elevio_driver.num_floors as usize);
+    let mut hall_request_assignments = 0; // TODO
 
     loop {
         select! {
             recv(node.from_master_channel()) -> message => {
                 let message = message.unwrap();
 
-                let DispatcherMessage::HallRequest(new_request) = message else {
-                    panic!("fuck");
-                };
+                info!("Received message from master."); // TODO: Add message and name
 
-                info!("Received state from master \"{}\":\n{}", global_worldview.name, global_worldview);
+                match message {
+                    Message::NewHallRequest(floor, direciotn) => {
+                    
+                    },
+                    Message::NewCabRequest(floor, name) => {
 
-                set_cab_lights(&elevio_driver, &requests);
-                set_hall_lights(&elevio_driver, &global_requests);
+                    },
+                    Message::ClearHallRequest(floor, directon, iteration) => {
 
-                elevator_command_tx.send(requests).unwrap();
+                    },
+                    Message::ClearCabRequest(floor, name, iteration) => {
 
-                // TODO: Proper acking
-
-                if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
-                    node.to_master_channel().send(local_worldview.clone()).unwrap();
+                    }
+                    _ => continue,
                 }
+
+                set_cab_lights(&elevio_driver, &cab_requests.as_bools(&name));
+                set_hall_lights(&elevio_driver, &hall_requests.as_bools());
+
+                elevator_command_tx.send(LocalRequests::from_vectors(cab_requests.as_bools(&name), &hall_requests.as_bools())).unwrap();
             },
             recv(node.from_slave_channel()) -> message => {
-                let mut slave_worldview = message.unwrap();
-                let mut slave_elevator_state = slave_worldview.local_elevator_state().clone();
-                let slave_name = &slave_worldview.name;
+                let message = message.unwrap();
 
-                info!("Master received message from \"{slave_name}\":\n{slave_worldview}");
-
-                let mut master_worldview = global_worldview.clone();
-                master_worldview.name = local_worldview.name.clone();
-
-                // If we have received a message from a deactivated slave, we can
-                // assume that it is alive and activate it again
-                if let Some(elevator) = master_worldview.elevators.get_mut(slave_name) {
-                    if !elevator.active {
-                        info!("Aktiverer \"{}\" :)", slave_name);
-                        elevator.active = true;
+                match message {
+                    Message::NewHallRequest(floor, direction) => {
+                        hall_requests.set_pending(floor, direction);
+                    },
+                    Message::NewCabRequest(floor, name) => {
+                        cab_requests.set_pending(floor, name)
+                    },
+                    Message::ClearHallRequest(floor, direction, iteration) => {
+                        // TODO: check iteration
+                        hall_requests.set_inactive(floor, direction);
+                    },
+                    Message::ClearCabRequest(floor, name, iteration) => {
+                        // TODO: check iteration
+                        cab_requests.set_inactive(floor, name);
                     }
-                } else {
-                    info!("New slave connected \"{}\"", slave_name);
+                    Message::ElevatorState(name, state) => {
+                        // TODO: Add timestamp
+                        elevator_states.insert(name, state);
+                    },
+                    _ => continue,
                 }
 
-                slave_elevator_state.timestamp_last_event = SystemTime::now();
-                master_worldview.elevators.insert(slave_name.clone(), slave_elevator_state);
-
-                if slave_worldview.iteration != master_worldview.iteration {
-                    warn!("Mottok ugyldig verdenssyn. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
-                    continue;
-                }
-
-                // Take new and delete completed orders
-                for (floor, received_request) in slave_worldview.hall_requests.iter().enumerate() {
-                    let master_request = master_worldview.hall_requests[floor].clone();
-
-                    match (&received_request.up, &master_request.up) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_worldview.add_request(floor, Direction::Up),
-                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_worldview.clear_request(floor, Direction::Up),
-                        _ => {},
-                    }
-
-                    match (&received_request.down, &master_request.down) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_worldview.add_request(floor, Direction::Down),
-                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_worldview.clear_request(floor, Direction::Down),
-                        _ => {},
-                    }
-                }
-
-                // If the slave is also the master, only add requests, Don't assign them until we hear from another slave
-                // about the requests. That way we guaranteee that at least two nodes know about the states.
-                if master_worldview.name != slave_worldview.name {
-                    master_worldview.assign_requests();
-                }
-
-                master_worldview.iteration += 1;
+                // TODO: Assign requests
 
                 // Send the worldview to all slaves. Slaves will repeat the message back to us as a form of ack.
-                node.to_slaves_channel().send(master_worldview.clone()).unwrap();
-
-                // Only update the global worldview if the slave which we received the update from is not also the master.
-                // This is requried because at least two nodes need to know about a worldview to guarantee that nothing is lost.
-                if master_worldview.name != slave_worldview.name {
-                    global_worldview = master_worldview
-                }
+                // node.to_slaves_channel().send(master_worldview.clone()).unwrap();
             },
             //Start to inform slaves that master exists
             recv(deactivation_ticker) -> _ => {
                 //Received current timestamp
-                let timestamp_start_master_server = SystemTime::now();
-                let mut changed = false;
+                // let timestamp_start_master_server = SystemTime::now();
+                // let mut changed = false;
 
-                let elevator_requests: HashMap<_, _> = global_worldview
-                    .elevators
-                    .keys()
-                    .map(|name| (name.clone(), global_worldview.requests_for_elevator(name)))
-                    .collect();
+                // let elevator_requests: HashMap<_, _> = global_worldview
+                //     .elevators
+                //     .keys()
+                //     .map(|name| (name.clone(), global_worldview.requests_for_elevator(name)))
+                //     .collect();
 
-                //Go through all elevators and get the timestamp for assigned requests.
-                for (name, elevator) in &mut global_worldview.elevators {
-                    if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
-                        let has_orders = elevator_requests[name].as_ref().unwrap().any_exists();
+                // //Go through all elevators and get the timestamp for assigned requests.
+                // for (name, elevator) in &mut global_worldview.elevators {
+                //     if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
+                //         let has_orders = elevator_requests[name].as_ref().unwrap().any_exists();
 
-                        if elevator.active && has_orders && duration > Duration::from_secs(5) {
-                            info!("Deactivating {name} :(");
-                            elevator.active = false;
-                            changed = true;
-                        }
-                    }
-                }
+                //         if elevator.active && has_orders && duration > Duration::from_secs(5) {
+                //             info!("Deactivating {name} :(");
+                //             elevator.active = false;
+                //             changed = true;
+                //         }
+                //     }
+                // }
 
-                if changed {
-                    global_worldview.assign_requests();
+                // if changed {
+                //     global_worldview.assign_requests();
 
-                    global_worldview.iteration += 1;
+                //     global_worldview.iteration += 1;
 
-                    //Inform all slaves about new orders
-                    global_worldview.name = local_worldview.name.clone();
-                    node.to_slaves_channel().send(global_worldview.clone()).unwrap();
-                }
+                //     //Inform all slaves about new orders
+                //     global_worldview.name = local_worldview.name.clone();
+                //     node.to_slaves_channel().send(global_worldview.clone()).unwrap();
+                // }
             },
             recv(elevator_event_rx) -> elevator_event => {
                 let elevator_event = elevator_event.unwrap();
 
-                let local_elevator = local_worldview.local_elevator_state();
-
                 match elevator_event {
-                    ElevatorEvent::FloorCleared((floor, direction)) => {
-                        local_elevator.cab_requests[floor] = false;
+                    ElevatorEvent::FloorServiced(floor, direction) => {
+                        // TODO: Do this conversion somewhere else
+                        let direction = match direction {
+                            ElevatorDirection::Up => Some(HallRequestDirection::Up),
+                            ElevatorDirection::Down => Some(HallRequestDirection::Down),
+                            ElevatorDirection::Stopped => None,
+                        };
 
-                        if direction != Direction::Down {
-                            debug!("Cleared up.");
-                            local_worldview.hall_requests[floor].up = HallRequestState::Inactive;
-                        }
-                        if direction != Direction::Up {
-                            debug!("Cleared down.");
-                            local_worldview.hall_requests[floor].down = HallRequestState::Inactive;
+                        if let Some(direction) = direction {
+                            node.to_master_channel().send(Message::ClearHallRequest(floor, direction, 0)).unwrap();
                         }
 
-                        //Send the updated order list to the elevator controller
-                        let requests = local_worldview.requests_for_local_elevator();
-                        elevator_command_tx.send(requests).unwrap();
+                        node.to_master_channel().send(Message::ClearCabRequest(floor, name.clone(), 0)).unwrap();
                     },
                     ElevatorEvent::StateUpdated(state) => {
-                        local_elevator.state = state;
+        
+                        node.to_master_channel().send(Message::ElevatorState(name.clone(), state)).unwrap();
                     },
                 }
 
-                //Inform the master about the new state
-                node.to_master_channel().send(local_worldview.clone()).unwrap();
             },
             recv(call_button_channel) -> call_button => {
                 let call_button = call_button.unwrap();
-
                 let floor = call_button.floor as usize;
-                let hall_request = &mut local_worldview.hall_requests[floor];
 
-                //Add order at floor
-                match call_button.call {
-                    HALL_UP if hall_request.up == HallRequestState::Inactive => hall_request.up = HallRequestState::Requested,
-                    HALL_DOWN if hall_request.down == HallRequestState::Inactive => hall_request.down = HallRequestState::Requested,
-                    CAB => local_worldview.local_elevator_state().cab_requests[floor] = true,
-                    _ => {},
-                }
+                let new_request_message = match call_button.call {
+                    HALL_UP => Message::NewHallRequest(floor, HallRequestDirection::Up),
+                    HALL_DOWN => Message::NewHallRequest(floor, HallRequestDirection::Down),
+                    CAB => Message::NewCabRequest(floor, name.clone()),
+                    invalid_call => {
+                        warn!("Received invalid call button: {invalid_call}");
+                        continue;
+                    },
+                };
 
-                //Inform the master about the new state
-                node.to_master_channel().send(local_worldview.clone()).unwrap();
+                node.to_master_channel().send(new_request_message).unwrap();
             },
         }
 
-        if let Err(e) = save_state_to_file(&local_worldview, "backup.json") {
-            error!("Could not save backup file: {e}");
-        }
+        // if let Err(e) = save_state_to_file(&local_worldview, "backup.json") {
+        //     error!("Could not save backup file: {e}");
+        // }
     }
 }

@@ -1,9 +1,8 @@
+use std::{process, thread};
 use clap::Parser;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
 use env_logger;
-use log::{info, LevelFilter};
-use std::{process::exit, thread::spawn};
 
 mod backup;
 mod elevator;
@@ -12,6 +11,7 @@ mod request_dispatch;
 mod requests;
 mod timer;
 mod worldview;
+mod message;
 
 #[derive(Debug, Parser)]
 /// Group 52's amazing distributed elevator control system.
@@ -31,7 +31,7 @@ struct Args {
 
 fn main() {
     env_logger::Builder::new()
-        .filter_level(LevelFilter::Trace)
+        .filter_level(log::LevelFilter::Trace)
         .init();
 
     let args = Args::parse();
@@ -41,26 +41,28 @@ fn main() {
             .unwrap();
 
     // Load state from backup if available
-    let inital_worldview = match backup::load_state_from_file("backup.json") {
-        Ok(worldview) => {
-            info!("Loaded backup.");
-            worldview
-        }
-        Err(_) => {
-            info!("No backup found.");
-            let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
-            worldview::Worldview::new(name, args.num_floors)
-        }
-    };
+    // let inital_worldview = match backup::load_state_from_file("backup.json") {
+    //     Ok(worldview) => {
+    //         info!("Loaded backup.");
+    //         worldview
+    //     }
+    //     Err(_) => {
+    //         info!("No backup found.");
+    //         let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
+    //         worldview::Worldview::new(name, args.num_floors)
+    //     }
+    // };
 
-    let node = network::Node::new(inital_worldview.name.clone());
+    let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
+
+    let node = network::Node::new(name.clone());
 
     let (elevator_command_tx, elevator_command_rx) = cbc::unbounded();
     let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();
 
     {
         let elevio_driver = elevio_driver.clone();
-        spawn(move || {
+        thread::spawn(move || {
             elevator::controller::controller_loop(
                 &elevio_driver,
                 elevator_command_rx,
@@ -70,12 +72,12 @@ fn main() {
     }
 
     request_dispatch::run_dispatcher(
+        name,
         node,
-        inital_worldview,
         &elevio_driver,
         elevator_command_tx,
         elevator_event_rx,
     );
 
-    exit(1);
+    process::exit(1);
 }

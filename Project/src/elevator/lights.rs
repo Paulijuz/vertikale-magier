@@ -1,38 +1,26 @@
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 
-use crate::{
-    requests::{global::GlobalRequests, local::LocalRequests},
-    worldview::{HallRequest, HallRequestState},
-};
-
-use super::controller::{Behaviour, ElevatorState};
-
-pub fn set_state_lights(elevio_driver: &Elevator, state: ElevatorState) {
-    elevio_driver.floor_indicator(state.floor as u8);
-    elevio_driver.door_light(state.behaviour == Behaviour::DoorOpen);
-}
-
-pub fn set_cab_lights(elevio_driver: &Elevator, requests: &LocalRequests) {
-    for (floor, (_, &cab)) in requests.iter().enumerate() {
+pub fn set_cab_lights(elevio_driver: &Elevator, requests: &Vec<bool>) {
+    for (floor, &on) in requests.iter().enumerate() {
         let floor = floor as u8;
 
-        elevio_driver.call_button_light(floor, CAB, cab);
+        elevio_driver.call_button_light(floor, CAB, on);
     }
 }
 
-pub fn set_hall_lights(elevio_driver: &Elevator, requests: &GlobalRequests) {
-    for (floor, hall_request) in requests.iter().enumerate() {
+pub fn set_hall_lights(elevio_driver: &Elevator, requests: &Vec<(bool, bool)>) {
+    for (floor, &(up_on, down_on)) in requests.iter().enumerate() {
         let floor = floor as u8;
 
         elevio_driver.call_button_light(
             floor,
             HALL_UP,
-            matches!(hall_request.up, HallRequestState::Assigned(_)),
+            up_on,
         );
         elevio_driver.call_button_light(
             floor,
             HALL_DOWN,
-            matches!(hall_request.down, HallRequestState::Assigned(_)),
+            down_on,
         );
     }
 }

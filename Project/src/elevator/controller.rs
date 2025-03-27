@@ -1,14 +1,14 @@
 use crossbeam_channel as cbc;
-use driver_rust::elevio::{self, elev::DIRN_STOP};
-use log::{debug, warn};
+use driver_rust::elevio::{self, elev::{CAB, DIRN_STOP, HALL_DOWN, HALL_UP}};
+use log::{error, debug, warn};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use super::{
-    inputs::{create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel},
+    inputs::{create_call_button_channel, create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel},
     requests::{Direction, RequestType, Requests},
 };
-use crate::timer::Timer;
+use crate::{elevator::lights::{set_cab_lights}, timer::Timer};
 
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 
@@ -46,36 +46,50 @@ fn next_state(floor: usize, direction: Option<Direction>, requests: &Requests) -
     match direction {
         Some(Direction::Up) => {
             if requests.up_at_floor(floor) {
+                error!("a case 1");
                 (Some(Direction::Up), Behaviour::DoorOpen)
             } else if requests.any_above_floor(floor) {
+                error!("a case 2");
                 (Some(Direction::Up), Behaviour::Moving)
-            } else if requests.any_at_floor(floor) {
+            } else if requests.down_at_floor(floor) {
+                error!("a case 3");
                 (Some(Direction::Down), Behaviour::DoorOpen)
             } else if requests.any_below_floor(floor) {
+                error!("a case 4");
                 (Some(Direction::Down), Behaviour::Moving)
             } else {
                 (None, Behaviour::Idle)
             }
         }
         Some(Direction::Down) => {
-            if requests.any_below_floor(floor) {
-                (Some(Direction::Down), Behaviour::Moving)
-            } else if requests.down_at_floor(floor) {
+            if requests.down_at_floor(floor) {
+                error!("b case 1");
                 (Some(Direction::Down), Behaviour::DoorOpen)
-            } else if requests.any_at_floor(floor) {
+            } else if requests.any_below_floor(floor) {
+                error!("b case 2");
+                (Some(Direction::Down), Behaviour::Moving)
+            } else if requests.up_at_floor(floor) {
+                error!("b case 3");
                 (Some(Direction::Up), Behaviour::DoorOpen)
             } else if requests.any_above_floor(floor) {
+                error!("b case 4");
                 (Some(Direction::Up), Behaviour::Moving)
             } else {
                 (None, Behaviour::Idle)
             }
         }
         None => {
-            if requests.any_at_floor(floor) {
-                (None, Behaviour::DoorOpen)
+            if requests.up_at_floor(floor) {
+                error!("c case 1");
+                (Some(Direction::Up), Behaviour::DoorOpen)
             } else if requests.any_above_floor(floor) {
+                error!("c case 2");
                 (Some(Direction::Up), Behaviour::Moving)
+            } else if requests.down_at_floor(floor) {
+                error!("c case 3");
+                (Some(Direction::Down), Behaviour::DoorOpen)
             } else if requests.any_below_floor(floor) {
+                error!("c case 4");
                 (Some(Direction::Down), Behaviour::Moving)
             } else {
                 (None, Behaviour::Idle)
@@ -166,6 +180,8 @@ fn clear_floor(
     floor: usize,
     direction: Option<Direction>,
 ) {
+    debug!("Clearing: {direction:?}");
+
     requests.clear(floor, RequestType::Cab);    
     elevator_event_tx.send(ElevatorEvent::RequestCleared(floor, RequestType::Cab)).unwrap();
 
@@ -182,13 +198,15 @@ fn clear_floor(
 pub fn controller_loop(
     elevio_driver: &elevio::elev::Elevator,
     elevator_command_rx: cbc::Receiver<ElevatorCommand>,
+    elevator_command_tx: cbc::Sender<ElevatorCommand>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
-    initialize_elevator_position(elevio_driver);
+    // initialize_elevator_position(elevio_driver);
 
     let floor_sensor_channel = create_floor_sensor_channel(elevio_driver);
     let obstruction_channel = create_obstruction_channel(elevio_driver);
     let stop_button_channel = create_stop_button_channel(elevio_driver);
+    let call_button_channel = create_call_button_channel(elevio_driver);
 
     let mut door_timer = Timer::new(DOOR_OPEN_DURATION);
 
@@ -202,8 +220,11 @@ pub fn controller_loop(
     let mut previous_state: Option<ElevatorState> = None;
 
     loop {
+        set_cab_lights(elevio_driver, &requests);
+
         // Only send the state if it has changed.
         if Some(state) != previous_state {
+            debug!("{:?}", state);
             previous_state = Some(state);
             elevator_event_tx
                 .send(ElevatorEvent::StateUpdated(state))
@@ -228,6 +249,7 @@ pub fn controller_loop(
                     },
                     Behaviour::Idle => {
                         (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
+                        debug!("Changed direction to: {:?}", state.direction);
 
                         match state.behaviour {
                             Behaviour::DoorOpen => {
@@ -258,8 +280,12 @@ pub fn controller_loop(
                     elevio_driver.motor_direction(DIRN_STOP);
 
                     (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
+                    debug!("Changed direction to: {:?}", state.direction);
 
                     if requests.any_at_floor(state.floor) {
+                        open_door(elevio_driver);
+                        clear_floor(&mut requests, &elevator_event_tx, state.floor, state.direction);
+                        door_timer.start();
                         state.behaviour = Behaviour::DoorOpen;
                         
                     } else {
@@ -282,10 +308,12 @@ pub fn controller_loop(
                 state.obstruction = obstruction.unwrap();
                 debug!("Detected obstruction: {:}", state.obstruction);
 
-                if state.obstruction {
-                    door_timer.stop();
-                } else {
-                    door_timer.start();
+                if state.behaviour == Behaviour::DoorOpen {
+                    if state.obstruction {
+                        door_timer.stop();
+                    } else {
+                        door_timer.start();
+                    }
                 }
             },
             recv(door_timer.timeout_channel()) -> _ => {
@@ -297,6 +325,7 @@ pub fn controller_loop(
                 close_door(elevio_driver);
 
                 (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
+                debug!("Changed direction to: {:?}", state.direction);
 
                 match state.behaviour {
                     Behaviour::DoorOpen => {
@@ -307,6 +336,19 @@ pub fn controller_loop(
                     Behaviour::Moving => {
                         start_motor(elevio_driver, state.direction);
                     },
+                    _ => {},
+                }
+            },
+            recv(call_button_channel) -> call_button => {
+                let call_button = call_button.unwrap();
+
+                let floor = call_button.floor as usize;
+
+                //Add order at floor
+                match call_button.call {
+                    HALL_UP => elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Up))).unwrap(),
+                    HALL_DOWN => elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Down))).unwrap(),
+                    CAB => elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Cab)).unwrap(),
                     _ => {},
                 }
             },

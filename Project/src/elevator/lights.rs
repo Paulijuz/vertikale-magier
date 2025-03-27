@@ -4,10 +4,12 @@ use super::requests::Requests;
 use crate::worldview::{HallRequest, HallRequestState}; // TODO: Remove this
 
 pub fn set_cab_lights(elevio_driver: &Elevator, requests: &Requests) {
-    for (floor, (_, &cab)) in requests.iter().enumerate() {
+    for (floor, ((&up, &down), &cab)) in requests.iter().enumerate() {
         let floor = floor as u8;
 
         elevio_driver.call_button_light(floor, CAB, cab);
+        elevio_driver.call_button_light(floor, HALL_UP, up);
+        elevio_driver.call_button_light(floor, HALL_DOWN, down);
     }
 }
 

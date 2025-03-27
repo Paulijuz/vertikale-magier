@@ -35,7 +35,7 @@ impl Requests {
         match request_type {
             RequestType::Cab => self.cab[floor] = true,
             RequestType::Hall(Direction::Up) => self.hall_up[floor] = true,
-            RequestType::Hall(Direction::Down) => self.hall_up[floor] = true,
+            RequestType::Hall(Direction::Down) => self.hall_down[floor] = true,
         }
     }
 
@@ -44,7 +44,7 @@ impl Requests {
         match request_type {
             RequestType::Cab => self.cab[floor] = false,
             RequestType::Hall(Direction::Up) => self.hall_up[floor] = false,
-            RequestType::Hall(Direction::Down) => self.hall_up[floor] = false,
+            RequestType::Hall(Direction::Down) => self.hall_down[floor] = false,
         }
     }
 

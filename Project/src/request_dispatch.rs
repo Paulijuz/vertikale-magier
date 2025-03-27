@@ -1,13 +1,13 @@
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{debug, error, info, warn};
+use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
-    time::{Duration, SystemTime},
+    collections::HashMap, time::{Duration, SystemTime}
 };
 
 use crate::elevator::{
-    controller::{ElevatorCommand, ElevatorEvent},
+    controller::{ElevatorCommand, ElevatorEvent, ElevatorState},
     inputs::create_call_button_channel,
     lights::{set_cab_lights, set_hall_lights}, requests::{Direction, RequestType},
 };
@@ -17,8 +17,16 @@ use crate::backup::save_state_to_file;
 
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DispatcherMessage {
+    ElevatorState(String, ElevatorState),
+    ClearRequest(String, usize, RequestType),
+    NewRequest(String, usize, RequestType),
+    Synchronize(Worldview),
+}
+
 pub fn run_dispatcher(
-    node: Node<Worldview>,
+    node: Node<DispatcherMessage>,
     inital_worldview: Worldview,
     elevio_driver: &Elevator,
     elevator_command_tx: Sender<ElevatorCommand>,
@@ -32,7 +40,12 @@ pub fn run_dispatcher(
     loop {
         select! {
             recv(node.from_master_channel()) -> message => {
-                global_worldview = message.unwrap();
+                let message = message.unwrap();
+
+                global_worldview = match message {
+                    DispatcherMessage::Synchronize(worldview) => worldview,
+                    _ => continue,
+                };
 
                 info!("Received state from master \"{}\":\n{}", global_worldview.name, global_worldview);
 
@@ -44,10 +57,10 @@ pub fn run_dispatcher(
                 set_hall_lights(&elevio_driver, &local_worldview.hall_requests);
 
                 for (floor, ((&up, &down), &cab)) in requests.iter().enumerate() {
-                    if up { 
+                    if up {
                         elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
                     } else {
-                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
+                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
                     }
 
                     if down {
@@ -63,12 +76,18 @@ pub fn run_dispatcher(
                     }
                 }
 
-                if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
-                    node.to_master_channel().send(local_worldview.clone()).unwrap();
-                }
+                // if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
+                //     node.to_master_channel().send(local_worldview.clone()).unwrap();
+                // }
             },
             recv(node.from_slave_channel()) -> message => {
-                let mut slave_worldview = message.unwrap();
+                let message = message.unwrap();
+
+                let mut slave_worldview = match message {
+                    DispatcherMessage::Synchronize(worldview) => worldview,
+                    _ => continue,
+                };
+
                 let mut slave_elevator_state = slave_worldview.local_elevator_state().clone();
                 let slave_name = &slave_worldview.name;
 
@@ -93,7 +112,7 @@ pub fn run_dispatcher(
 
                 if slave_worldview.iteration != master_worldview.iteration {
                     warn!("Received invalid worldview. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
-                    node.to_slaves_channel().send(global_worldview.clone()).unwrap();
+                    node.to_slaves_channel().send(DispatcherMessage::Synchronize(global_worldview.clone())).unwrap();
                     continue;
                 }
 
@@ -116,20 +135,20 @@ pub fn run_dispatcher(
 
                 // If the slave is also the master, only add requests, Don't assign them until we hear from another slave
                 // about the requests. That way we guaranteee that at least two nodes know about the states.
-                if master_worldview.name != slave_worldview.name {
-                    master_worldview.assign_requests();
-                }
+                // if master_worldview.name != slave_worldview.name {
+                master_worldview.assign_requests();
+                // }
 
                 master_worldview.iteration += 1;
 
                 // Send the worldview to all slaves. Slaves will repeat the message back to us as a form of ack.
-                node.to_slaves_channel().send(master_worldview.clone()).unwrap();
+                node.to_slaves_channel().send(DispatcherMessage::Synchronize(master_worldview.clone())).unwrap();
 
                 // Only update the global worldview if the slave which we received the update from is not also the master.
                 // This is requried because at least two nodes need to know about a worldview to guarantee that nothing is lost.
-                if master_worldview.name != slave_worldview.name {
+                // if master_worldview.name != slave_worldview.name {
                     global_worldview = master_worldview
-                }
+                // }
             },
             //Start to inform slaves that master exists
             recv(deactivation_ticker) -> _ => {
@@ -163,7 +182,7 @@ pub fn run_dispatcher(
 
                     //Inform all slaves about new orders
                     global_worldview.name = local_worldview.name.clone();
-                    node.to_slaves_channel().send(global_worldview.clone()).unwrap();
+                    node.to_slaves_channel().send(DispatcherMessage::Synchronize(global_worldview.clone())).unwrap();
                 }
             },
             recv(elevator_event_rx) -> elevator_event => {
@@ -173,11 +192,14 @@ pub fn run_dispatcher(
 
                 match elevator_event {
                     ElevatorEvent::RequestCleared(floor, request_type) => {
+                        error!("fff {request_type:?}");
                         match request_type {
                             RequestType::Cab => local_elevator.cab_requests[floor] = false,
                             RequestType::Hall(Direction::Up) => local_worldview.hall_requests[floor].up = HallRequestState::Inactive,
                             RequestType::Hall(Direction::Down) => local_worldview.hall_requests[floor].down = HallRequestState::Inactive,
                         }
+
+                        dbg!(&local_worldview);
                     },
                     ElevatorEvent::StateUpdated(state) => {
                         local_elevator.state = state;
@@ -185,7 +207,7 @@ pub fn run_dispatcher(
                 }
 
                 //Inform the master about the new state
-                node.to_master_channel().send(local_worldview.clone()).unwrap();
+                node.to_master_channel().send(DispatcherMessage::Synchronize(local_worldview.clone())).unwrap();
             },
             recv(call_button_channel) -> call_button => {
                 let call_button = call_button.unwrap();
@@ -202,7 +224,7 @@ pub fn run_dispatcher(
                 }
 
                 //Inform the master about the new state
-                node.to_master_channel().send(local_worldview.clone()).unwrap();
+                node.to_master_channel().send(DispatcherMessage::Synchronize(local_worldview.clone())).unwrap();
             },
         }
 

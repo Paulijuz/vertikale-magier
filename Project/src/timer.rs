@@ -1,5 +1,5 @@
 use crossbeam_channel as cbc;
-use log::debug;
+use log::{debug, warn};
 use std::{
     thread::{spawn, JoinHandle},
     time::{Duration, Instant},

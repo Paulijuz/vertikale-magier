@@ -139,7 +139,7 @@ fn run_node<T: Transmit>(
 
                 match &role {
                     Role::Master(_) => {
-                        info!("\nFound master node \"{}\": {}", advertisment.name, master_address);
+                        info!("Found master node \"{}\": {}", advertisment.name, master_address);
                         advertiser.stop_advertising();
 
                         debug!("Waiting to connect...");
@@ -162,7 +162,7 @@ fn run_node<T: Transmit>(
                 }
             },
             recv(host_receive_channel) -> message => {
-                debug!("\nData from slave recieved!");
+                debug!("Data from slave recieved!");
 
                 if matches!(role, Role::Slave(_)) {
                     panic!("A slave should not be able to receive a message from another slave.")
@@ -173,7 +173,7 @@ fn run_node<T: Transmit>(
                 from_slave_channel.send(data).unwrap();
             },
             recv(client_receive_channel) -> message => {
-                debug!("\nData from master recieved.");
+                debug!("Data from master recieved.");
 
                 if matches!(role, Role::Master(_)) {
                     panic!("A master should not be able to receive a message from another master.")

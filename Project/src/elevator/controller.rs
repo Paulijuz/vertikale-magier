@@ -1,5 +1,5 @@
 use crossbeam_channel as cbc;
-use driver_rust::elevio::{self, elev::{CAB, DIRN_STOP, HALL_DOWN, HALL_UP}};
+use driver_rust::elevio;
 use log::{error, debug, warn};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -61,7 +61,7 @@ fn next_state(floor: usize, direction: Option<Direction>, requests: &Requests) -
                 (None, Behaviour::Idle)
             }
         }
-        Some(Direction::Down) => {
+        _ => {
             if requests.down_at_floor(floor) {
                 error!("b case 1");
                 (Some(Direction::Down), Behaviour::DoorOpen)
@@ -74,23 +74,6 @@ fn next_state(floor: usize, direction: Option<Direction>, requests: &Requests) -
             } else if requests.any_above_floor(floor) {
                 error!("b case 4");
                 (Some(Direction::Up), Behaviour::Moving)
-            } else {
-                (None, Behaviour::Idle)
-            }
-        }
-        None => {
-            if requests.up_at_floor(floor) {
-                error!("c case 1");
-                (Some(Direction::Up), Behaviour::DoorOpen)
-            } else if requests.any_above_floor(floor) {
-                error!("c case 2");
-                (Some(Direction::Up), Behaviour::Moving)
-            } else if requests.down_at_floor(floor) {
-                error!("c case 3");
-                (Some(Direction::Down), Behaviour::DoorOpen)
-            } else if requests.any_below_floor(floor) {
-                error!("c case 4");
-                (Some(Direction::Down), Behaviour::Moving)
             } else {
                 (None, Behaviour::Idle)
             }
@@ -161,17 +144,19 @@ fn close_door(elevio_driver: &elevio::elev::Elevator) -> Result<(), ()> {
 }
 
 //Initialize the elevator position to the bottom floor
-fn initialize_elevator_position(elevio_driver: &elevio::elev::Elevator) {
+fn initialize_elevator_position(elevio_driver: &elevio::elev::Elevator) -> usize {
     debug!("Initializing elevator position.");
     elevio_driver.motor_direction(elevio::elev::DIRN_DOWN);
-    while elevio_driver.floor_sensor().is_none() {
+
+    loop {
+        if let Some(floor) = elevio_driver.floor_sensor() {
+            debug!("Elevator initialized at floor {floor}.");
+            elevio_driver.motor_direction(elevio::elev::DIRN_UP);
+            return floor as usize;
+        }
+
         std::thread::sleep(Duration::from_millis(50));
     }
-    elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
-    debug!(
-        "Elevator initialized at floor {},",
-        elevio_driver.floor_sensor().unwrap()
-    );
 }
 
 fn clear_floor(
@@ -201,7 +186,7 @@ pub fn controller_loop(
     elevator_command_tx: cbc::Sender<ElevatorCommand>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
-    // initialize_elevator_position(elevio_driver);
+    let inital_floor = initialize_elevator_position(elevio_driver);
 
     let floor_sensor_channel = create_floor_sensor_channel(elevio_driver);
     let obstruction_channel = create_obstruction_channel(elevio_driver);
@@ -214,8 +199,8 @@ pub fn controller_loop(
     let mut state = ElevatorState {
         behaviour: Behaviour::Idle,
         direction: None,
-        obstruction: true, // Assume worst until we hear otherwise
-        floor: elevio_driver.floor_sensor().unwrap_or(0) as usize, //Using detected floor
+        obstruction: elevio_driver.obstruction(),
+        floor: inital_floor,
     };
     let mut previous_state: Option<ElevatorState> = None;
 
@@ -277,7 +262,7 @@ pub fn controller_loop(
                 }
 
                 if should_stop(state.floor, state.direction, &requests) {
-                    elevio_driver.motor_direction(DIRN_STOP);
+                    elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
 
                     (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
                     debug!("Changed direction to: {:?}", state.direction);

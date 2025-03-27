@@ -56,14 +56,12 @@ pub fn run_dispatcher(
                 set_cab_lights(&elevio_driver, &requests);
                 set_hall_lights(&elevio_driver, &local_worldview.hall_requests);
 
-                dbg!(&requests);
-
                 for (floor, ((&up, &down), &cab)) in requests.iter().enumerate() {
-                    // if up {
-                    //     elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
-                    // } else {
-                    //     elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
-                    // }
+                    if up {
+                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
+                    } else {
+                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
+                    }
 
                     if down {
                         debug!("Sending up!");
@@ -73,11 +71,11 @@ pub fn run_dispatcher(
                         elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
                     }
 
-                    // if cab {
-                    //     elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Cab)).unwrap();
-                    // } else {
-                    //     elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Cab)).unwrap();
-                    // }
+                    if cab {
+                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Cab)).unwrap();
+                    } else {
+                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Cab)).unwrap();
+                    }
                 }
 
                 // if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
@@ -196,14 +194,11 @@ pub fn run_dispatcher(
 
                 match elevator_event {
                     ElevatorEvent::RequestCleared(floor, request_type) => {
-                        error!("fff {request_type:?}");
                         match request_type {
                             RequestType::Cab => local_elevator.cab_requests[floor] = false,
                             RequestType::Hall(Direction::Up) => local_worldview.hall_requests[floor].up = HallRequestState::Inactive,
                             RequestType::Hall(Direction::Down) => local_worldview.hall_requests[floor].down = HallRequestState::Inactive,
                         }
-
-                        dbg!(&local_worldview);
                     },
                     ElevatorEvent::StateUpdated(state) => {
                         local_elevator.state = state;

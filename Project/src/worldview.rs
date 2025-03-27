@@ -5,7 +5,7 @@ use std::{collections::HashMap, fmt, time::SystemTime};
 use crate::{
     elevator::{
         controller::{Behaviour, Direction, ElevatorState},
-        requests::Requests,
+        requests::{RequestDirection, RequestType, Requests},
     },
     hall_request_assigner::{run_hall_request_assigner, HraBehaviour, HraDirection, HraState},
 };
@@ -205,17 +205,17 @@ impl Worldview {
 
         for (floor, cab_request) in self.elevators.get(name)?.cab_requests.iter().enumerate() {
             if *cab_request {
-                requests.add_cab(floor);
+                requests.add(floor, RequestType::Cab);
             }
         }
 
         for (floor, hall_request) in self.hall_requests.iter().enumerate() {
             if hall_request.up == HallRequestState::Assigned(name.clone()) {
-                requests.add_up(floor);
+                requests.add(floor, RequestType::Hall(RequestDirection::Up));
             }
 
             if hall_request.down == HallRequestState::Assigned(name.clone()) {
-                requests.add_down(floor);
+                requests.add(floor, RequestType::Hall(RequestDirection::Up));
             }
         }
 

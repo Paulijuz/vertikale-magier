@@ -151,7 +151,7 @@ fn initialize_elevator_position(elevio_driver: &elevio::elev::Elevator) -> usize
     loop {
         if let Some(floor) = elevio_driver.floor_sensor() {
             debug!("Elevator initialized at floor {floor}.");
-            elevio_driver.motor_direction(elevio::elev::DIRN_UP);
+            elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
             return floor as usize;
         }
 

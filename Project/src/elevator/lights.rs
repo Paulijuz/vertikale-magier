@@ -12,16 +12,8 @@ pub fn set_hall_lights(elevio_driver: &Elevator, requests: &Vec<(bool, bool)>) {
     for (floor, &(up_on, down_on)) in requests.iter().enumerate() {
         let floor = floor as u8;
 
-        elevio_driver.call_button_light(
-            floor,
-            HALL_UP,
-            up_on,
-        );
-        elevio_driver.call_button_light(
-            floor,
-            HALL_DOWN,
-            down_on,
-        );
+        elevio_driver.call_button_light(floor, HALL_UP, up_on);
+        elevio_driver.call_button_light(floor, HALL_DOWN, down_on);
     }
 }
 

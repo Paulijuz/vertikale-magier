@@ -1,5 +1,9 @@
-use std::{cmp::max, collections::{HashMap, HashSet}, iter::zip};
 use serde::{Deserialize, Serialize};
+use std::{
+    cmp::max,
+    collections::{HashMap, HashSet},
+    iter::zip,
+};
 
 // #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 // pub enum RequestType {
@@ -78,7 +82,10 @@ pub fn requests_states_as_bools(request_states: &Vec<RequestState>) -> Vec<bool>
 }
 
 /// Takes two vectors of `RequestState` structs and create a new third array with the merged states.
-pub fn merge_request_vectors(requests_a: &Vec<RequestState>, requests_b: &Vec<RequestState>) -> Vec<RequestState> {
+pub fn merge_request_vectors(
+    requests_a: &Vec<RequestState>,
+    requests_b: &Vec<RequestState>,
+) -> Vec<RequestState> {
     zip(requests_a, requests_b)
         .map(|(self_reqeust, other_requesst)| self_reqeust.merge(other_requesst))
         .collect()

@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{elevator::controller::ElevatorState, requests::{cab::CabRequests, hall::{HallRequestDirection, HallRequests}}};
+use crate::{
+    elevator::controller::ElevatorState,
+    requests::{
+        cab::CabRequests,
+        hall::{HallRequestDirection, HallRequests},
+    },
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {

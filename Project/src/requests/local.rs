@@ -106,7 +106,6 @@ impl LocalRequests {
     }
 }
 
-
 //     // Adds a request of given type at given floor.
 //     pub fn add(&mut self, floor: usize, request_type: RequestType) {
 //         match request_type {
@@ -168,6 +167,6 @@ impl LocalRequests {
 //             },
 //             None => false,
 //         }
-        
+
 //     }
 // }

@@ -1,5 +1,5 @@
-pub mod assigner;
-pub mod state;
-pub mod local;
-pub mod hall;
+pub mod assignments;
 pub mod cab;
+pub mod hall;
+pub mod local;
+pub mod state;

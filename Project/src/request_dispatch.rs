@@ -1,15 +1,24 @@
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
-use log::{warn, info};
+use log::{error, info, warn};
 use std::{collections::HashMap, time::Duration};
 
-use crate::{elevator::{
-    controller::{ElevatorDirection, ElevatorEvent, ElevatorState},
-    inputs::create_call_button_channel,
-    lights::{set_cab_lights, set_hall_lights},
-}, message::Message, requests::{cab::CabRequests, hall::{HallRequestDirection, HallRequests}}};
+use crate::hall_request_assigner::run::run_hall_request_assigner;
 use crate::network::Node;
+use crate::requests::assignments::HallRequestAssignments;
 use crate::requests::local::LocalRequests;
+use crate::{
+    elevator::{
+        controller::{ElevatorDirection, ElevatorEvent, ElevatorState},
+        inputs::create_call_button_channel,
+        lights::{set_cab_lights, set_hall_lights},
+    },
+    message::Message,
+    requests::{
+        cab::CabRequests,
+        hall::{HallRequestDirection, HallRequests},
+    },
+};
 
 // #[derive(Debug, Clone, Serialize, Deserialize)]
 // enum DispatcherMessage {
@@ -34,7 +43,7 @@ pub fn run_dispatcher(
     let mut elevator_states = HashMap::<String, ElevatorState>::new();
     let mut cab_requests = CabRequests::new(elevio_driver.num_floors as usize);
     let mut hall_requests = HallRequests::new(elevio_driver.num_floors as usize);
-    let mut hall_request_assignments = 0; // TODO
+    let mut hall_request_assignments = HallRequestAssignments::new(elevio_driver.num_floors as usize); // TODO
 
     loop {
         select! {
@@ -44,18 +53,24 @@ pub fn run_dispatcher(
                 info!("Received message from master."); // TODO: Add message and name
 
                 match message {
-                    Message::NewHallRequest(floor, direciotn) => {
-                    
+                    Message::NewHallRequest(floor, direction) => {
+                        hall_requests.set_pending(floor, direction);
                     },
                     Message::NewCabRequest(floor, name) => {
-
+                        cab_requests.set_pending(floor, name)
                     },
-                    Message::ClearHallRequest(floor, directon, iteration) => {
-
+                    Message::ClearHallRequest(floor, direction, iteration) => {
+                        // TODO: check iteration
+                        hall_requests.set_inactive(floor, direction);
                     },
                     Message::ClearCabRequest(floor, name, iteration) => {
-
+                        // TODO: check iteration
+                        cab_requests.set_inactive(floor, name);
                     }
+                    Message::ElevatorState(name, state) => {
+                        // TODO: Add timestamp
+                        elevator_states.insert(name, state);
+                    },
                     _ => continue,
                 }
 
@@ -89,7 +104,20 @@ pub fn run_dispatcher(
                     _ => continue,
                 }
 
-                // TODO: Assign requests
+                let hra_result = run_hall_request_assigner(
+                    elevio_driver.num_floors as usize,
+                    &hall_requests,
+                    &cab_requests,
+                    &elevator_states
+                );
+                
+                match hra_result {
+                    Ok(assignments) => hall_request_assignments = assignments,
+                    Err(error) => {
+                        error!("Could not assign hall requests: {error}");
+                        continue;
+                    },
+                }
 
                 // Send the worldview to all slaves. Slaves will repeat the message back to us as a form of ack.
                 // node.to_slaves_channel().send(master_worldview.clone()).unwrap();
@@ -148,7 +176,6 @@ pub fn run_dispatcher(
                         node.to_master_channel().send(Message::ClearCabRequest(floor, name.clone(), 0)).unwrap();
                     },
                     ElevatorEvent::StateUpdated(state) => {
-        
                         node.to_master_channel().send(Message::ElevatorState(name.clone(), state)).unwrap();
                     },
                 }

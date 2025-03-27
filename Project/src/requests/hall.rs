@@ -1,12 +1,12 @@
 use std::iter::zip;
 
-use serde::{Deserialize, Serialize};
 use super::state::{merge_request_vectors, requests_states_as_bools, RequestState};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HallRequestDirection {
     Up,
-    Down
+    Down,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,7 +25,11 @@ impl HallRequests {
         }
     }
 
-    fn request_state_mut(&mut self, floor: usize, direction: HallRequestDirection) -> &mut RequestState {
+    fn request_state_mut(
+        &mut self,
+        floor: usize,
+        direction: HallRequestDirection,
+    ) -> &mut RequestState {
         match direction {
             HallRequestDirection::Up => &mut self.up[floor],
             HallRequestDirection::Down => &mut self.down[floor],
@@ -53,8 +57,9 @@ impl HallRequests {
 
     pub fn as_bools(&self) -> Vec<(bool, bool)> {
         zip(
-            requests_states_as_bools(&self.up), 
-            requests_states_as_bools(&self.down)
-        ).collect()
+            requests_states_as_bools(&self.up),
+            requests_states_as_bools(&self.down),
+        )
+        .collect()
     }
 }

@@ -112,13 +112,19 @@ fn next_state(
 /// floor, direciton and requests.
 fn should_stop(floor: usize, direction: ElevatorDirection, requests: &LocalRequests) -> bool {
     match direction {
-        ElevatorDirection::Down => requests.down_at_floor(floor) || !requests.any_below_floor(floor),
+        ElevatorDirection::Down => {
+            requests.down_at_floor(floor) || !requests.any_below_floor(floor)
+        }
         ElevatorDirection::Up => requests.up_at_floor(floor) || !requests.any_above_floor(floor),
         ElevatorDirection::Stopped => true,
     }
 }
 
-fn should_instantly_clear(floor: usize, direction: ElevatorDirection, requests: &LocalRequests) -> bool {
+fn should_instantly_clear(
+    floor: usize,
+    direction: ElevatorDirection,
+    requests: &LocalRequests,
+) -> bool {
     match direction {
         ElevatorDirection::Down => requests.down_at_floor(floor),
         ElevatorDirection::Up => requests.up_at_floor(floor),
@@ -129,7 +135,10 @@ fn should_instantly_clear(floor: usize, direction: ElevatorDirection, requests: 
 /// Starts the motor in the given direction.
 ///
 /// **Note:** Trying to start the motor in the direction `Stopped` will return an error.
-fn start_motor(elevio_driver: &elevio::elev::Elevator, direction: ElevatorDirection) -> Result<(), ()> {
+fn start_motor(
+    elevio_driver: &elevio::elev::Elevator,
+    direction: ElevatorDirection,
+) -> Result<(), ()> {
     match direction {
         ElevatorDirection::Up => elevio_driver.motor_direction(elevio::elev::DIRN_UP),
         ElevatorDirection::Down => elevio_driver.motor_direction(elevio::elev::DIRN_DOWN),

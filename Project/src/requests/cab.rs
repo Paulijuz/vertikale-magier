@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use super::state::{merge_request_maps, requests_states_as_bools, RequestState};
 
@@ -18,10 +18,11 @@ impl CabRequests {
     }
 
     fn request_state_mut(&mut self, floor: usize, name: String) -> &mut RequestState {
-        let request_states_entry = self.map
+        let request_states_entry = self
+            .map
             .entry(name)
             .or_insert(vec![RequestState::default(); self.num_floors]);
-        
+
         &mut request_states_entry[floor]
     }
 

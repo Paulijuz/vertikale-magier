@@ -1,17 +1,17 @@
-use std::{process, thread};
 use clap::Parser;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
 use env_logger;
+use std::{process, thread};
 
 mod backup;
 mod elevator;
+mod hall_request_assigner;
+mod message;
 mod network;
 mod request_dispatch;
 mod requests;
 mod timer;
-mod worldview;
-mod message;
 
 #[derive(Debug, Parser)]
 /// Group 52's amazing distributed elevator control system.

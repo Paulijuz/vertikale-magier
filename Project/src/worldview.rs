@@ -13,38 +13,35 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ElevatorView {
     pub state: ElevatorState,
-    pub cab_requests: Vec<bool>,
     pub active: bool,
     pub timestamp_last_event: SystemTime,
 }
 
-impl From<&ElevatorView> for HraState {
-    fn from(elevator_view: &ElevatorView) -> Self {
-        HraState {
-            behaviour: match elevator_view.state.behaviour {
-                Behaviour::DoorOpen => HraBehaviour::DoorOpen,
-                Behaviour::Moving => HraBehaviour::Moving,
-                _ => HraBehaviour::Idle,
-            },
-            floor: elevator_view.state.floor,
-            direction: match elevator_view.state.direction {
-                Some(Direction::Down) => HraDirection::Down,
-                None => HraDirection::Stop,
-                Some(Direction::Up) => HraDirection::Up,
-            },
-            cab_requests: elevator_view.cab_requests.clone(),
-        }
+fn create_hra_state(elevator_view: &ElevatorView, cab_requests: &Vec<bool>) -> HraState {
+    HraState {
+        behaviour: match elevator_view.state.behaviour {
+            Behaviour::DoorOpen => HraBehaviour::DoorOpen,
+            Behaviour::Moving => HraBehaviour::Moving,
+            _ => HraBehaviour::Idle,
+        },
+        floor: elevator_view.state.floor,
+        direction: match elevator_view.state.direction {
+            Some(Direction::Down) => HraDirection::Down,
+            None => HraDirection::Stop,
+            Some(Direction::Up) => HraDirection::Up,
+        },
+        cab_requests: cab_requests.clone(),
     }
 }
 
 impl fmt::Display for ElevatorView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let cab_requests_string = self
-            .cab_requests
-            .iter()
-            .map(|&v| if v { "*" } else { "-" })
-            .collect::<Vec<_>>()
-            .join(" ");
+        // let cab_requests_string = self
+        //     .cab_requests
+        //     .iter()
+        //     .map(|&v| if v { "*" } else { "-" })
+        //     .collect::<Vec<_>>()
+        //     .join(" ");
 
         let age = match SystemTime::now().duration_since(self.timestamp_last_event) {
             Ok(age) => age.as_secs().to_string(),
@@ -53,13 +50,13 @@ impl fmt::Display for ElevatorView {
 
         writeln!(
             f,
-            "Age: {} s\nActive: {}\nState: {:?}\nDirection: {:?}\nFloor: {}\nInternal orders:\n  1 2 3 4\n  {}",
+            "Age: {} s\nActive: {}\nState: {:?}\nDirection: {:?}\nFloor: {}",//\nInternal orders:\n  1 2 3 4\n  {}",
             age,
             self.active,
             self.state.behaviour,
             self.state.direction,
             self.state.floor + 1,
-            cab_requests_string,
+            // cab_requests_string,
         )
     }
 }
@@ -95,8 +92,7 @@ pub struct HallRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Worldview {
-    pub name: String,
-    pub elevators: HashMap<String, ElevatorView>, // List of all active elevators
+    pub cab_requests: HashMap<String, Vec<bool>>, // List of all active elevators
     pub hall_requests: Vec<HallRequest>,
     pub iteration: i32,
     num_floors: usize,
@@ -107,17 +103,17 @@ impl fmt::Display for Worldview {
         writeln!(f, "Iteration: {}", self.iteration)?;
         writeln!(f, "Elevators:")?;
 
-        let mut sorted_elevators: Vec<(&String, &ElevatorView)> =
-            self.elevators.iter().collect::<Vec<_>>();
-        sorted_elevators.sort_by_key(|(name, _)| *name);
+        // let mut sorted_elevators: Vec<(&String, &ElevatorView)> =
+            // self.elevators.iter().collect::<Vec<_>>();
+        // sorted_elevators.sort_by_key(|(name, _)| *name);
 
-        for (name, elevator_state) in sorted_elevators {
-            writeln!(f, "  {name}:")?;
+        // for (name, elevator_state) in sorted_elevators {
+        //     writeln!(f, "  {name}:")?;
 
-            for line in elevator_state.to_string().lines() {
-                writeln!(f, "    {line}")?;
-            }
-        }
+        //     for line in elevator_state.to_string().lines() {
+        //         writeln!(f, "    {line}")?;
+        //     }
+        // }
 
         writeln!(f, "Orders:")?;
         writeln!(f, "  {:>6} | {:<16} | {:<16}", "Floor", "Down", "Up")?;
@@ -137,32 +133,31 @@ impl fmt::Display for Worldview {
 }
 
 impl Worldview {
-    pub fn new(name: String, num_floors: usize) -> Self {
+    pub fn new(num_floors: usize) -> Self {
         Self {
-            name,
+            cab_requests: HashMap::new(),
             hall_requests: vec![HallRequest::default(); num_floors],
             num_floors,
-            elevators: HashMap::new(),
             iteration: 0,
         }
     }
-    pub fn add_request(&mut self, floor: usize, direction: Direction) {
-        match direction {
-            Direction::Up => self.hall_requests[floor].up = HallRequestState::Requested,
-            Direction::Down => self.hall_requests[floor].down = HallRequestState::Requested,
-            _ => panic!("Tried to assign request with invalid direction"),
+    pub fn add_request(&mut self, floor: usize, name: String, request_type: RequestType) {
+        match request_type {
+            RequestType::Hall(Direction::Up) => self.hall_requests[floor].up = HallRequestState::Requested,
+            RequestType::Hall(Direction::Down) => self.hall_requests[floor].down = HallRequestState::Requested,
+            RequestType::Cab => self.cab_requests.entry(name).or_insert(vec![false; self.num_floors])[floor] = true,
         }
     }
 
-    pub fn clear_request(&mut self, floor: usize, direction: Direction) {
-        match direction {
-            Direction::Up => self.hall_requests[floor].up = HallRequestState::Inactive,
-            Direction::Down => self.hall_requests[floor].down = HallRequestState::Inactive,
-            _ => panic!("Tried to assign request with invalid direction"),
+    pub fn clear_request(&mut self, floor: usize, name: String, request_type: RequestType) {
+        match request_type {
+            RequestType::Hall(Direction::Up) => self.hall_requests[floor].up = HallRequestState::Inactive,
+            RequestType::Hall(Direction::Down) => self.hall_requests[floor].down = HallRequestState::Inactive,
+            RequestType::Cab => self.cab_requests.entry(name).or_insert(vec![false; self.num_floors])[floor] = false,
         }
     }
     // Velger beste heis for en bestilling
-    pub fn assign_requests(&mut self) {
+    pub fn assign_requests(&mut self, elevator_views: &HashMap<String, ElevatorView>) {
         let hall_requests = self
             .hall_requests
             .iter()
@@ -173,11 +168,11 @@ impl Worldview {
                 )
             })
             .collect();
-        let states = self
-            .elevators
+
+        let states = elevator_views
             .iter()
             .filter(|(_, v)| v.active)
-            .map(|(k, v)| (k.to_owned(), v.into()))
+            .map(|(k, v)| (k.to_owned(), create_hra_state(v, self.cab_requests.get(k).unwrap_or(&vec![false; self.num_floors]))))
             .collect();
 
         let assignments = match run_hall_request_assigner(hall_requests, states) {
@@ -203,9 +198,11 @@ impl Worldview {
     pub fn requests_for_elevator(&self, name: &String) -> Option<Requests> {
         let mut requests = Requests::new(self.num_floors);
 
-        for (floor, cab_request) in self.elevators.get(name)?.cab_requests.iter().enumerate() {
-            if *cab_request {
-                requests.add(floor, RequestType::Cab);
+        if let Some(cab_requests) = self.cab_requests.get(name) {
+            for (floor, cab_request) in cab_requests.iter().enumerate() {
+                if *cab_request {
+                    requests.add(floor, RequestType::Cab);
+                }
             }
         }
 
@@ -220,44 +217,5 @@ impl Worldview {
         }
 
         return Some(requests);
-    }
-    pub fn requests_for_local_elevator(&self) -> Requests {
-        self.requests_for_elevator(&self.name)
-            .unwrap_or(Requests::new(self.num_floors))
-    }
-    pub fn set_local_elevator_state(&mut self, local_elevator_state: ElevatorView) {
-        self.elevators
-            .insert(self.name.clone(), local_elevator_state.clone());
-    }
-    pub fn local_elevator_state(&mut self) -> &mut ElevatorView {
-        if !self.elevators.contains_key(&self.name) {
-            self.elevators.insert(
-                self.name.clone(),
-                ElevatorView {
-                    active: true,
-                    cab_requests: vec![false; self.num_floors],
-                    state: ElevatorState {
-                        direction: None,
-                        behaviour: Behaviour::Idle,
-                        obstruction: false,
-                        floor: 0,
-                    },
-                    timestamp_last_event: SystemTime::now(),
-                },
-            );
-        }
-
-        self.elevators.get_mut(&self.name).unwrap()
-    }
-    pub fn sync_with_master(&mut self, master_state: Worldview) {
-        let local_elevator_state = self.local_elevator_state().to_owned();
-
-        *self = Self {
-            name: self.name.clone(),
-            ..master_state
-        };
-
-        self.elevators
-            .insert(self.name.clone(), local_elevator_state);
     }
 }

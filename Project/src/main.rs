@@ -47,8 +47,7 @@ fn main() {
 
     // Load state from backup if available
     let inital_worldview = if args.no_backup {
-        let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
-        worldview::Worldview::new(name, args.num_floors)
+        worldview::Worldview::new(args.num_floors)
     } else {
         match backup::load_state_from_file("backup.json") {
             Ok(worldview) => {
@@ -57,13 +56,14 @@ fn main() {
             }
             Err(_) => {
                 info!("No backup found.");
-                let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
-                worldview::Worldview::new(name, args.num_floors)
+                worldview::Worldview::new(args.num_floors)
             }
         }
     };
 
-    let node = network::Node::<request_dispatch::DispatcherMessage>::new(inital_worldview.name.clone());
+    let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
+
+    let node = network::Node::<request_dispatch::DispatcherMessage>::new(name.clone());
 
     let (elevator_command_tx, elevator_command_rx) = cbc::unbounded();
     let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();
@@ -79,7 +79,10 @@ fn main() {
         });
     }
 
+    info!("Starting as {}.", name);
+
     request_dispatch::run_dispatcher(
+        name,
         node,
         inital_worldview,
         &elevio_driver,

@@ -221,7 +221,6 @@ pub fn controller_loop(
                     },
                     Behaviour::Idle => {
                         (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
-                        debug!("Changed direction to: {:?}", state.direction);
 
                         match state.behaviour {
                             Behaviour::DoorOpen => {
@@ -252,7 +251,6 @@ pub fn controller_loop(
                     elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
 
                     (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
-                    debug!("Changed direction to: {:?}", state.direction);
 
                     if requests.any_at_floor(state.floor) {
                         open_door(elevio_driver);
@@ -297,7 +295,6 @@ pub fn controller_loop(
                 close_door(elevio_driver);
 
                 (state.direction, state.behaviour) = next_state(state.floor, state.direction, &requests);
-                debug!("Changed direction to: {:?}", state.direction);
 
                 match state.behaviour {
                     Behaviour::DoorOpen => {

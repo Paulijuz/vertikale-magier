@@ -6,13 +6,13 @@ use std::{
     collections::HashMap, time::{Duration, SystemTime}
 };
 
-use crate::elevator::{
+use crate::{elevator::{
     controller::{ElevatorCommand, ElevatorEvent, ElevatorState},
     inputs::create_call_button_channel,
     lights::{set_cab_lights, set_hall_lights}, requests::{Direction, RequestType},
-};
+}, worldview::ElevatorView};
 use crate::network::Node;
-use crate::worldview::{HallRequestState, Worldview};
+use crate::worldview::Worldview;
 use crate::backup::save_state_to_file;
 
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
@@ -22,18 +22,20 @@ pub enum DispatcherMessage {
     ElevatorState(String, ElevatorState),
     ClearRequest(String, usize, RequestType),
     NewRequest(String, usize, RequestType),
-    Synchronize(Worldview),
+    Synchronize(String, Worldview),
 }
 
 pub fn run_dispatcher(
+    name: String,
     node: Node<DispatcherMessage>,
     inital_worldview: Worldview,
     elevio_driver: &Elevator,
     elevator_command_tx: Sender<ElevatorCommand>,
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
-    let mut global_worldview = inital_worldview.clone();
-    let mut local_worldview = inital_worldview;
+    let mut request_views = inital_worldview.clone();
+    let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
+
     let deactivation_ticker = tick(Duration::from_millis(1000));
     let call_button_channel = create_call_button_channel(elevio_driver);
 
@@ -42,19 +44,24 @@ pub fn run_dispatcher(
             recv(node.from_master_channel()) -> message => {
                 let message = message.unwrap();
 
-                global_worldview = match message {
-                    DispatcherMessage::Synchronize(worldview) => worldview,
-                    _ => continue,
-                };
-
-                info!("Received state from master \"{}\":\n{}", global_worldview.name, global_worldview);
+                match message {
+                    DispatcherMessage::Synchronize(name, worldview) => {
+                        info!("Received state from master \"{}\":\n{}", name, request_views);
+                        request_views = worldview;
+                    },
+                    invalid_message => {
+                        warn!("Received invalid message from master: {invalid_message:?}");
+                        continue;
+                    },
+                }
 
                 // Sync with the master and send new requests to the elevator controller
-                local_worldview.sync_with_master(global_worldview.clone());
-                let requests = local_worldview.requests_for_local_elevator();
+                let Some(requests) = request_views.requests_for_elevator(&name) else {
+                    continue;
+                };
 
                 set_cab_lights(&elevio_driver, &requests);
-                set_hall_lights(&elevio_driver, &local_worldview.hall_requests);
+                set_hall_lights(&elevio_driver, &request_views.hall_requests);
 
                 for (floor, ((&up, &down), &cab)) in requests.iter().enumerate() {
                     if up {
@@ -64,10 +71,8 @@ pub fn run_dispatcher(
                     }
 
                     if down {
-                        debug!("Sending up!");
                         elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
                     } else {
-                        debug!("Clearing up!");
                         elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
                     }
 
@@ -84,150 +89,108 @@ pub fn run_dispatcher(
             },
             recv(node.from_slave_channel()) -> message => {
                 let message = message.unwrap();
+                
+                info!("Received message from slave: {message:?}");
 
-                let mut slave_worldview = match message {
-                    DispatcherMessage::Synchronize(worldview) => worldview,
-                    _ => continue,
-                };
+                match message {
+                    DispatcherMessage::ElevatorState(name, state) => {
+                        // If we have received a message from a deactivated slave, we can
+                        // assume that it is alive and activate it again
+                        if let Some(elevator) = elevator_views.get_mut(&name) {
+                            if !elevator.active {
+                                info!("Activating \"{}\" :)", name);
+                            }
+                        } else {
+                            info!("New slave \"{}\" connected.", name);
+                        }
 
-                let mut slave_elevator_state = slave_worldview.local_elevator_state().clone();
-                let slave_name = &slave_worldview.name;
-
-                info!("Master received message from \"{slave_name}\":\n{slave_worldview}");
-
-                let mut master_worldview = global_worldview.clone();
-                master_worldview.name = local_worldview.name.clone();
-
-                // If we have received a message from a deactivated slave, we can
-                // assume that it is alive and activate it again
-                if let Some(elevator) = master_worldview.elevators.get_mut(slave_name) {
-                    if !elevator.active {
-                        info!("Aktiverer \"{}\" :)", slave_name);
-                        elevator.active = true;
-                    }
-                } else {
-                    info!("New slave connected \"{}\"", slave_name);
+                        elevator_views.insert(name, ElevatorView {
+                            active: true,
+                            state,
+                            timestamp_last_event: SystemTime::now(),
+                        });
+                    },
+                    DispatcherMessage::NewRequest(name, floor, request_type) => {
+                        request_views.add_request(floor, name, request_type);
+                    },
+                    DispatcherMessage::ClearRequest(name, floor, request_type) => {
+                        request_views.clear_request(floor, name, request_type);
+                    },
+                    _ => {},
                 }
 
-                slave_elevator_state.timestamp_last_event = SystemTime::now();
-                master_worldview.elevators.insert(slave_name.clone(), slave_elevator_state);
+                request_views.assign_requests(&elevator_views);
 
-                if slave_worldview.iteration != master_worldview.iteration {
-                    warn!("Received invalid worldview. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
-                    node.to_slaves_channel().send(DispatcherMessage::Synchronize(global_worldview.clone())).unwrap();
-                    continue;
-                }
-
-                // Take new and delete completed orders
-                for (floor, received_request) in slave_worldview.hall_requests.iter().enumerate() {
-                    let master_request = master_worldview.hall_requests[floor].clone();
-
-                    match (&received_request.up, &master_request.up) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_worldview.add_request(floor, Direction::Up),
-                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_worldview.clear_request(floor, Direction::Up),
-                        _ => {},
-                    }
-
-                    match (&received_request.down, &master_request.down) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_worldview.add_request(floor, Direction::Down),
-                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_worldview.clear_request(floor, Direction::Down),
-                        _ => {},
-                    }
-                }
-
-                // If the slave is also the master, only add requests, Don't assign them until we hear from another slave
-                // about the requests. That way we guaranteee that at least two nodes know about the states.
-                // if master_worldview.name != slave_worldview.name {
-                master_worldview.assign_requests();
+                // if slave_worldview.iteration != master_worldview.iteration {
+                //     warn!("Received invalid worldview. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
+                //     node.to_slaves_channel().send(DispatcherMessage::Synchronize(global_worldview.clone())).unwrap();
+                //     continue;
                 // }
 
-                master_worldview.iteration += 1;
-
-                // Send the worldview to all slaves. Slaves will repeat the message back to us as a form of ack.
-                node.to_slaves_channel().send(DispatcherMessage::Synchronize(master_worldview.clone())).unwrap();
-
-                // Only update the global worldview if the slave which we received the update from is not also the master.
-                // This is requried because at least two nodes need to know about a worldview to guarantee that nothing is lost.
-                // if master_worldview.name != slave_worldview.name {
-                    global_worldview = master_worldview
-                // }
+                node.to_slaves_channel().send(DispatcherMessage::Synchronize(name.clone(), request_views.clone())).unwrap();
             },
             //Start to inform slaves that master exists
             recv(deactivation_ticker) -> _ => {
                 //Received current timestamp
-                let timestamp_start_master_server = SystemTime::now();
+                let noew = SystemTime::now();
                 let mut changed = false;
 
-                let elevator_requests: HashMap<_, _> = global_worldview
-                    .elevators
-                    .keys()
-                    .map(|name| (name.clone(), global_worldview.requests_for_elevator(name)))
-                    .collect();
+                for (name, elevator) in &mut elevator_views {
+                    let Ok(duration) = noew.duration_since(elevator.timestamp_last_event) else {
+                        continue;
+                    };
 
-                //Go through all elevators and get the timestamp for assigned requests.
-                for (name, elevator) in &mut global_worldview.elevators {
-                    if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
-                        let has_orders = elevator_requests[name].as_ref().unwrap().any_exists();
+                    let has_orders = request_views.requests_for_elevator(name).map_or(false, |requests| requests.any_exists());
 
-                        if elevator.active && has_orders && duration > ELEVATOR_TIMEOUT {
-                            info!("Deactivating {name} :(");
-                            elevator.active = false;
-                            changed = true;
-                        }
+                    if elevator.active && has_orders && duration > ELEVATOR_TIMEOUT {
+                        info!("Deactivating {name}. :(");
+                        elevator.active = false;
+                        changed = true;
                     }
                 }
 
                 if changed {
-                    global_worldview.assign_requests();
-
-                    global_worldview.iteration += 1;
+                    request_views.assign_requests(&elevator_views);
+                    request_views.iteration += 1;
 
                     //Inform all slaves about new orders
-                    global_worldview.name = local_worldview.name.clone();
-                    node.to_slaves_channel().send(DispatcherMessage::Synchronize(global_worldview.clone())).unwrap();
+                    node.to_slaves_channel().send(DispatcherMessage::Synchronize(name.clone(), request_views.clone())).unwrap();
                 }
             },
             recv(elevator_event_rx) -> elevator_event => {
                 let elevator_event = elevator_event.unwrap();
 
-                let local_elevator = local_worldview.local_elevator_state();
-
-                match elevator_event {
+                let message = match elevator_event {
                     ElevatorEvent::RequestCleared(floor, request_type) => {
-                        match request_type {
-                            RequestType::Cab => local_elevator.cab_requests[floor] = false,
-                            RequestType::Hall(Direction::Up) => local_worldview.hall_requests[floor].up = HallRequestState::Inactive,
-                            RequestType::Hall(Direction::Down) => local_worldview.hall_requests[floor].down = HallRequestState::Inactive,
-                        }
+                        DispatcherMessage::ClearRequest(name.clone(), floor, request_type)
                     },
                     ElevatorEvent::StateUpdated(state) => {
-                        local_elevator.state = state;
+                        DispatcherMessage::ElevatorState(name.clone(), state)
                     },
-                }
+                };
 
                 //Inform the master about the new state
-                node.to_master_channel().send(DispatcherMessage::Synchronize(local_worldview.clone())).unwrap();
+                node.to_master_channel().send(message).unwrap();
             },
             recv(call_button_channel) -> call_button => {
                 let call_button = call_button.unwrap();
-
                 let floor = call_button.floor as usize;
-                let hall_request = &mut local_worldview.hall_requests[floor];
 
-                //Add order at floor
-                match call_button.call {
-                    HALL_UP if hall_request.up == HallRequestState::Inactive => hall_request.up = HallRequestState::Requested,
-                    HALL_DOWN if hall_request.down == HallRequestState::Inactive => hall_request.down = HallRequestState::Requested,
-                    CAB => local_worldview.local_elevator_state().cab_requests[floor] = true,
-                    _ => {},
-                }
+                let request_type = match call_button.call {
+                    HALL_UP => RequestType::Hall(Direction::Up),
+                    HALL_DOWN => RequestType::Hall(Direction::Down),
+                    CAB => RequestType::Cab,
+                    unknown_call => {
+                        warn!("Received unkown call button: {unknown_call}");
+                        continue;
+                    },
+                };
 
-                //Inform the master about the new state
-                node.to_master_channel().send(DispatcherMessage::Synchronize(local_worldview.clone())).unwrap();
+                node.to_master_channel().send(DispatcherMessage::NewRequest(name.clone(), floor, request_type)).unwrap();
             },
         }
 
-        if let Err(e) = save_state_to_file(&local_worldview, "backup.json") {
+        if let Err(e) = save_state_to_file(&request_views, "backup.json") {
             error!("Could not save backup file: {e}");
         }
     }

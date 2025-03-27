@@ -7,9 +7,9 @@ use std::{process::exit, thread::spawn};
 
 mod backup;
 mod elevator;
+mod hall_request_assigner;
 mod network;
 mod request_dispatch;
-mod requests;
 mod timer;
 mod worldview;
 

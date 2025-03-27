@@ -6,15 +6,14 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::backup::save_state_to_file;
 use crate::elevator::{
     controller::{Direction, ElevatorEvent},
     inputs::create_call_button_channel,
     lights::{set_cab_lights, set_hall_lights},
 };
 use crate::network::Node;
-use crate::requests::requests::Requests;
 use crate::worldview::{HallRequestState, Worldview};
+use crate::{backup::save_state_to_file, elevator::requests::Requests};
 
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 

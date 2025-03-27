@@ -1,16 +1,7 @@
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 
-use crate::{
-    requests::requests::Requests,
-    worldview::{HallRequest, HallRequestState},
-};
-
-use super::controller::{Behaviour, ElevatorState};
-
-pub fn set_state_lights(elevio_driver: &Elevator, state: ElevatorState) {
-    elevio_driver.floor_indicator(state.floor as u8);
-    elevio_driver.door_light(state.behaviour == Behaviour::DoorOpen);
-}
+use super::requests::Requests;
+use crate::worldview::{HallRequest, HallRequestState}; // TODO: Remove this
 
 pub fn set_cab_lights(elevio_driver: &Elevator, requests: &Requests) {
     for (floor, (_, &cab)) in requests.iter().enumerate() {

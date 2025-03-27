@@ -4,10 +4,11 @@ use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use super::inputs::{
-    create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel,
+use super::{
+    inputs::{create_floor_sensor_channel, create_obstruction_channel, create_stop_button_channel},
+    requests::Requests,
 };
-use crate::{elevator::lights::set_state_lights, requests::requests::Requests, timer::Timer};
+use crate::timer::Timer;
 
 const DOOR_OPEN_DURATION: Duration = Duration::from_secs(3);
 
@@ -153,10 +154,12 @@ fn initialize_elevator_position(elevio_driver: &elevio::elev::Elevator) {
     while elevio_driver.floor_sensor().is_none() {
         std::thread::sleep(Duration::from_millis(50));
     }
-    elevio_driver.motor_direction(elevio::elev::DIRN_STOP); 
-    debug!("Elevator initialized at floor {}," , elevio_driver.floor_sensor().unwrap());
+    elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
+    debug!(
+        "Elevator initialized at floor {},",
+        elevio_driver.floor_sensor().unwrap()
+    );
 }
-    
 
 /// The main loop for the elevator FSM. It is an event based loop that listen for events from
 /// the elevio driver and the `command_channel`. TODO: Further explain command channel.
@@ -167,7 +170,6 @@ pub fn controller_loop(
     elevator_command_rx: cbc::Receiver<Requests>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
-
     initialize_elevator_position(elevio_driver);
 
     let floor_sensor_channel = create_floor_sensor_channel(elevio_driver);
@@ -192,7 +194,6 @@ pub fn controller_loop(
             elevator_event_tx
                 .send(ElevatorEvent::StateUpdated(state))
                 .unwrap();
-            set_state_lights(elevio_driver, state);
         }
 
         cbc::select! {
@@ -228,6 +229,8 @@ pub fn controller_loop(
             recv(floor_sensor_channel) -> floor => {
                 state.floor = floor.unwrap() as usize;
                 debug!("Detected floor: {}", state.floor);
+
+                elevio_driver.floor_indicator(state.floor as u8);
 
                 if state.behaviour != Behaviour::Moving {
                     continue;

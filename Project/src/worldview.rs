@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, time::SystemTime};
 
 use crate::{
-    elevator::controller::{Behaviour, Direction, ElevatorState},
-    requests::{
-        assigner::{self, HraBehaviour, HraDirection, HraState},
+    elevator::{
+        controller::{Behaviour, Direction, ElevatorState},
         requests::Requests,
     },
+    hall_request_assigner::{run_hall_request_assigner, HraBehaviour, HraDirection, HraState},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,7 +180,7 @@ impl Worldview {
             .map(|(k, v)| (k.to_owned(), v.into()))
             .collect();
 
-        let assignments = match assigner::run_hall_request_assigner(hall_requests, states) {
+        let assignments = match run_hall_request_assigner(hall_requests, states) {
             Ok(assignments) => assignments,
             Err(message) => {
                 error!("Could not assign requests: {message}");

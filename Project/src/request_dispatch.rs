@@ -23,6 +23,7 @@ use crate::{
 
 const DEACTIVATION_POLL: Duration = Duration::from_millis(100);
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(5000);
+const ELEVATOR_TIMEIN: Duration = Duration::from_millis(15000);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
@@ -131,6 +132,11 @@ pub fn run_dispatcher(
                         }
                     },
                     Message::ClearRequests(name, requests) => {
+                        // If we recieve a clear floor from an elevator we can be sure it's alive.
+                        if let Some(elevator) = elevator_views.get_mut(&name) {
+                            elevator.timestamp_last_event = SystemTime::now();
+                        }
+                        
                         let mut changed = false;
 
                         for (floor, request_type, iteration) in requests {
@@ -141,12 +147,6 @@ pub fn run_dispatcher(
                             warn!("Failed to clear requests.");
                             continue;
                         }
-
-                        // If we recieve a clear floor from an elevator we can be sure it's alive.
-                        if let Some(elevator) = elevator_views.get_mut(&name) {
-                            elevator.timestamp_last_event = SystemTime::now();
-                        }
-
                     },
                     Message::Acks(name, requests) => {
                         let mut changed = false;
@@ -213,7 +213,7 @@ pub fn run_dispatcher(
                         info!("Deactivating {name}. :(");
                         elevator.active = false;
                         changed = true;
-                    } else if !elevator.active && duration < ELEVATOR_TIMEOUT {
+                    } else if !elevator.active && (duration < ELEVATOR_TIMEOUT || duration > ELEVATOR_TIMEIN) {
                         info!("Activating {name}. :)");
                         elevator.active = true;
                         changed = true;

@@ -3,17 +3,23 @@ use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap, time::{Duration, SystemTime}
+    collections::HashMap,
+    time::{Duration, SystemTime},
 };
 
-use crate::{elevator::{
-    controller::{ElevatorCommand, ElevatorEvent, ElevatorState},
-    inputs::create_call_button_channel,
-    lights::{set_cab_lights, set_hall_lights}, requests::{Direction, RequestType},
-}, hall_request_assigner::{assign_requests, RequestAssignments}, worldview::ElevatorView};
+use crate::backup::save_state_to_file;
 use crate::network::Node;
 use crate::worldview::RequestStates;
-use crate::backup::save_state_to_file;
+use crate::{
+    elevator::{
+        controller::{ElevatorCommand, ElevatorEvent, ElevatorState},
+        inputs::create_call_button_channel,
+        lights::{set_cab_lights, set_hall_lights},
+        requests::{Direction, RequestType},
+    },
+    hall_request_assigner::{assign_requests, RequestAssignments},
+    worldview::ElevatorView,
+};
 
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 
@@ -55,10 +61,10 @@ pub fn run_dispatcher(
                         continue;
                     },
                 }
- 
+
                 set_cab_lights(&elevio_driver, &request_views.cab_requests_as_bools(&name));
                 set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
-               
+
                 // Sync with the master and send new requests to the elevator controller
                 for (active, floor, request_type) in request_assignments.requests_for_elevator(&name) {
                     if active {
@@ -75,7 +81,7 @@ pub fn run_dispatcher(
             },
             recv(node.from_slave_channel()) -> message => {
                 let message = message.unwrap();
-                
+
                 info!("Received message from slave: {message:?}");
 
                 match message {

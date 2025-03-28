@@ -2,7 +2,13 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
 
-use crate::{elevator::{controller::Behaviour, requests::{self, Direction, RequestType}}, worldview::{ElevatorView, RequestStates, RequestStatus}};
+use crate::{
+    elevator::{
+        controller::Behaviour,
+        requests::{Direction, RequestType},
+    },
+    worldview::{ElevatorView, RequestStates, RequestStatus},
+};
 
 #[derive(Serialize, Deserialize)]
 pub enum HraBehaviour {
@@ -98,8 +104,16 @@ pub struct RequestAssignments {
     pub cab: HashMap<String, Vec<bool>>,
 }
 
-fn assignees_to_requests(name: &String, assignees: &Vec<Option<String>>, request_type: RequestType) -> Vec<(bool, usize, RequestType)> {
-    assignees.iter().enumerate().map(|(floor, assignee)| (assignee.as_ref() == Some(name), floor, request_type)).collect()
+fn assignees_to_requests(
+    name: &String,
+    assignees: &Vec<Option<String>>,
+    request_type: RequestType,
+) -> Vec<(bool, usize, RequestType)> {
+    assignees
+        .iter()
+        .enumerate()
+        .map(|(floor, assignee)| (assignee.as_ref() == Some(name), floor, request_type))
+        .collect()
 }
 
 impl RequestAssignments {
@@ -113,12 +127,19 @@ impl RequestAssignments {
 
     pub fn requests_for_elevator(&self, name: &String) -> Vec<(bool, usize, RequestType)> {
         let hall_up = assignees_to_requests(name, &self.hall_up, RequestType::Hall(Direction::Up));
-        let hall_down = assignees_to_requests(name, &self.hall_down, RequestType::Hall(Direction::Down));
+        let hall_down =
+            assignees_to_requests(name, &self.hall_down, RequestType::Hall(Direction::Down));
 
         let requests = hall_up.into_iter().chain(hall_down);
 
         if let Some(cab) = self.cab.get(name) {
-            requests.chain(cab.iter().enumerate().map(|(floor, &active)| (active, floor, RequestType::Cab))).collect()
+            requests
+                .chain(
+                    cab.iter()
+                        .enumerate()
+                        .map(|(floor, &active)| (active, floor, RequestType::Cab)),
+                )
+                .collect()
         } else {
             requests.collect()
         }
@@ -127,13 +148,18 @@ impl RequestAssignments {
     pub fn has_assignment(&self, name: &String) -> bool {
         let assignee = Some(name.clone());
 
-        self.cab.get(name).map_or(false, |cab_requests| cab_requests.contains(&true))
-        || self.hall_up.contains(&assignee)
-        || self.hall_down.contains(&assignee)
+        self.cab
+            .get(name)
+            .map_or(false, |cab_requests| cab_requests.contains(&true))
+            || self.hall_up.contains(&assignee)
+            || self.hall_down.contains(&assignee)
     }
 }
 
-pub fn assign_requests(request_states: &RequestStates, elevator_views: &HashMap<String, ElevatorView>) -> Option<RequestAssignments> {
+pub fn assign_requests(
+    request_states: &RequestStates,
+    elevator_views: &HashMap<String, ElevatorView>,
+) -> Option<RequestAssignments> {
     let num_floors = request_states.hall_requests.len();
 
     let hall_requests: Vec<(bool, bool)> = request_states
@@ -147,12 +173,28 @@ pub fn assign_requests(request_states: &RequestStates, elevator_views: &HashMap<
         })
         .collect();
 
-    let cab_requests: HashMap<String, Vec<bool>> = request_states.cab_requests.iter().map(|(k, v)| (k.clone(), v.iter().map(|request| *request == RequestStatus::Active).collect())).collect();
+    let cab_requests: HashMap<String, Vec<bool>> = request_states
+        .cab_requests
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                v.iter()
+                    .map(|request| *request == RequestStatus::Active)
+                    .collect(),
+            )
+        })
+        .collect();
 
     let states = elevator_views
         .iter()
         .filter(|(_, v)| v.active)
-        .map(|(k, v)| (k.to_owned(), create_hra_state(v, &cab_requests.get(k).unwrap_or(&vec![false; num_floors]))))
+        .map(|(k, v)| {
+            (
+                k.to_owned(),
+                create_hra_state(v, &cab_requests.get(k).unwrap_or(&vec![false; num_floors])),
+            )
+        })
         .collect();
 
     let assignments = match run_hall_request_assigner(hall_requests, states) {
@@ -162,7 +204,6 @@ pub fn assign_requests(request_states: &RequestStates, elevator_views: &HashMap<
             return None;
         }
     };
-
 
     let mut request_assignments = RequestAssignments::new(num_floors);
 

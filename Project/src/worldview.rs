@@ -1,12 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, time::SystemTime};
 
-use crate::{
-    elevator::{
-        controller::{Behaviour, ElevatorState},
-        requests::{Direction, RequestType},
-    },
-    hall_request_assigner::{HraBehaviour, HraDirection, HraState},
+use crate::elevator::{
+    controller::ElevatorState,
+    requests::{Direction, RequestType},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -31,7 +28,7 @@ impl fmt::Display for ElevatorView {
 
         writeln!(
             f,
-            "Age: {} s\nActive: {}\nState: {:?}\nDirection: {:?}\nFloor: {}",//\nInternal orders:\n  1 2 3 4\n  {}",
+            "Age: {} s\nActive: {}\nState: {:?}\nDirection: {:?}\nFloor: {}", //\nInternal orders:\n  1 2 3 4\n  {}",
             age,
             self.active,
             self.state.behaviour,
@@ -85,7 +82,7 @@ impl fmt::Display for RequestStates {
         writeln!(f, "Elevators:")?;
 
         // let mut sorted_elevators: Vec<(&String, &ElevatorView)> =
-            // self.elevators.iter().collect::<Vec<_>>();
+        // self.elevators.iter().collect::<Vec<_>>();
         // sorted_elevators.sort_by_key(|(name, _)| *name);
 
         // for (name, elevator_state) in sorted_elevators {
@@ -124,17 +121,35 @@ impl RequestStates {
     }
     pub fn set_pending(&mut self, floor: usize, name: String, request_type: RequestType) {
         match request_type {
-            RequestType::Hall(Direction::Up) => self.hall_requests[floor].up = RequestStatus::Pending,
-            RequestType::Hall(Direction::Down) => self.hall_requests[floor].down = RequestStatus::Pending,
-            RequestType::Cab => self.cab_requests.entry(name).or_insert(vec![RequestStatus::Inactive; self.num_floors])[floor] = RequestStatus::Pending,
+            RequestType::Hall(Direction::Up) => {
+                self.hall_requests[floor].up = RequestStatus::Pending
+            }
+            RequestType::Hall(Direction::Down) => {
+                self.hall_requests[floor].down = RequestStatus::Pending
+            }
+            RequestType::Cab => {
+                self.cab_requests
+                    .entry(name)
+                    .or_insert(vec![RequestStatus::Inactive; self.num_floors])[floor] =
+                    RequestStatus::Pending
+            }
         }
     }
 
     pub fn set_inactive(&mut self, floor: usize, name: String, request_type: RequestType) {
         match request_type {
-            RequestType::Hall(Direction::Up) => self.hall_requests[floor].up = RequestStatus::Inactive,
-            RequestType::Hall(Direction::Down) => self.hall_requests[floor].down = RequestStatus::Inactive,
-            RequestType::Cab => self.cab_requests.entry(name).or_insert(vec![RequestStatus::Inactive; self.num_floors])[floor] = RequestStatus::Inactive,
+            RequestType::Hall(Direction::Up) => {
+                self.hall_requests[floor].up = RequestStatus::Inactive
+            }
+            RequestType::Hall(Direction::Down) => {
+                self.hall_requests[floor].down = RequestStatus::Inactive
+            }
+            RequestType::Cab => {
+                self.cab_requests
+                    .entry(name)
+                    .or_insert(vec![RequestStatus::Inactive; self.num_floors])[floor] =
+                    RequestStatus::Inactive
+            }
         }
     }
 
@@ -159,11 +174,25 @@ impl RequestStates {
     }
 
     pub fn hall_requests_as_bools(&self) -> Vec<(bool, bool)> {
-        self.hall_requests.iter().map(|request| (request.up == RequestStatus::Active, request.down == RequestStatus::Active)).collect()
+        self.hall_requests
+            .iter()
+            .map(|request| {
+                (
+                    request.up == RequestStatus::Active,
+                    request.down == RequestStatus::Active,
+                )
+            })
+            .collect()
     }
 
     pub fn cab_requests_as_bools(&self, name: &String) -> Vec<bool> {
-        self.cab_requests.get(name)
-            .map_or(vec![false; self.hall_requests.len()], |requessts| requessts.iter().map(|request| *request == RequestStatus::Active).collect())
+        self.cab_requests
+            .get(name)
+            .map_or(vec![false; self.hall_requests.len()], |requessts| {
+                requessts
+                    .iter()
+                    .map(|request| *request == RequestStatus::Active)
+                    .collect()
+            })
     }
 }

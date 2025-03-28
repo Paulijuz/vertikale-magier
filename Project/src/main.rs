@@ -1,7 +1,10 @@
 use clap::Parser;
 use crossbeam_channel as cbc;
 use driver_rust::elevio;
-use elevator::{controller::ElevatorCommand, requests::{Direction, RequestType}};
+use elevator::{
+    controller::ElevatorCommand,
+    requests::{Direction, RequestType},
+};
 use env_logger;
 use log::{info, LevelFilter};
 use std::{process::exit, thread::spawn};

@@ -47,6 +47,7 @@ pub fn run_dispatcher(
     let mut slave_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
     let mut master_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
     let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
+    let mut newest_elevator_state: Option<ElevatorState> = None;
     let mut role: Role = Role::Master(HashSet::new());
 
     let deactivation_ticker = tick(DEACTIVATION_POLL);
@@ -185,8 +186,13 @@ pub fn run_dispatcher(
                 if role != new_role {
                     role = new_role;
 
-                    if let Role::Master(connected_nodes) = &role {
-                        info!("Connected nodes: {connected_nodes:?}");
+                    match &role {
+                        Role::Master(connected_nodes) => {
+                            info!("Connected nodes: {connected_nodes:?}");
+                        },
+                        Role::Slave => if let Some(elevator_state) = newest_elevator_state {
+                            node.to_master_channel().send(Message::ElevatorState(name.clone(), elevator_state)).unwrap();
+                        },
                     }
                 }
             },

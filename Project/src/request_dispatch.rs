@@ -142,6 +142,16 @@ pub fn run_dispatcher(
                             warn!("Failed to clear requests.");
                             continue;
                         }
+
+                        // If we recieve a clear floor from an elevator we can be sure it's alive.
+                        if let Some(elevator) = elevator_views.get_mut(&name) {
+                            if !elevator.active {
+                                info!("Activating \"{}\" :)", name);
+                                elevator.active = true;
+                                elevator.timestamp_last_event = SystemTime::now();
+                            }
+                        }
+
                     },
                     Message::Acks(name, requests) => {
                         let mut changed = false;

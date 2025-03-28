@@ -207,12 +207,12 @@ pub fn run_dispatcher(
 
                     if elevator.active && master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
                         info!("Deactivating {name}. :(");
-                        elevator.active = false;
-                        changed = true;
+                        // elevator.active = false;
+                        // changed = true;
                     } else if !elevator.active && duration < ELEVATOR_TIMEOUT {
                         info!("Activating {name}. :)");
                         elevator.active = true;
-                        changed = true;
+                        // changed = true;
                     }
                 }
 

@@ -27,7 +27,7 @@ const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
     ElevatorState(String, ElevatorState),
-    ClearRequest(String, usize, RequestType, u32),
+    ClearRequests(String, Vec<(usize, RequestType, u32)>),
     NewRequest(String, usize, RequestType),
     RequestStates(RequestStates),
     Acks(String, Vec<(String, usize, RequestType, u32)>),
@@ -60,7 +60,7 @@ pub fn run_dispatcher(
 
                 match message {
                     Message::RequestStates(new_request_views) => {
-                        debug!("Received state from master \"{}\":\n{:?}", name, new_request_views);
+                        // debug!("Received state from master \"{}\":\n{:?}", name, new_request_views);
                         request_views = new_request_views;
 
                         let not_acked = request_views.not_acked(&name);
@@ -73,7 +73,7 @@ pub fn run_dispatcher(
                         set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
                     },
                     Message::RequestAssignments(new_request_assignments) => {
-                        debug!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
+                        // debug!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
                         request_assignments = new_request_assignments;
 
                         for (active, floor, request_type) in request_assignments.requests(&name) {
@@ -126,9 +126,15 @@ pub fn run_dispatcher(
                             continue;
                         }
                     },
-                    Message::ClearRequest(name, floor, request_type, iteration) => {
-                        if !request_views.set_inactive(floor, name, request_type, iteration) {
-                            warn!("Failed to clear request.");
+                    Message::ClearRequests(name, requests) => {
+                        let mut changed = false;
+
+                        for (floor, request_type, iteration) in requests {
+                            changed |= request_views.set_inactive(floor, name.clone(), request_type, iteration);
+                        }
+
+                        if !changed {
+                            warn!("Failed to clear requests.");
                             continue;
                         }
                     },
@@ -208,8 +214,8 @@ pub fn run_dispatcher(
                 let elevator_event = elevator_event.unwrap();
 
                 let message = match elevator_event {
-                    ElevatorEvent::RequestCleared(floor, request_type) => {
-                        Message::ClearRequest(name.clone(), floor, request_type, request_views.iteration(floor, &name, request_type))
+                    ElevatorEvent::RequestsCleared(requests) => {
+                        Message::ClearRequests(name.clone(), requests.iter().map(|&(floor, request_type)| (floor, request_type, request_views.iteration(floor, &name, request_type))).collect())
                     },
                     ElevatorEvent::StateUpdated(state) => {
                         Message::ElevatorState(name.clone(), state)

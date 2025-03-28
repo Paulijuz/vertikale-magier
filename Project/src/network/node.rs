@@ -118,7 +118,7 @@ fn run_node<T: Transmit>(
     shutdown_channel: Receiver<()>,
 ) {
     let host = Host::<T>::new_tcp_host(0).unwrap();
-    let port = host.port();
+    let mut port = host.port();
 
     let advertisment = NodeAdvertisment {
         name: name.clone(),
@@ -165,27 +165,24 @@ fn run_node<T: Transmit>(
                 connection_update_channel.send(Role::Master(names)).unwrap();
 
                 for (address, advertisment) in advertisments {
-                    let Some(port) = advertisment.port else {
+                    let Some(advertised_port) = advertisment.port else {
                         continue;
                     };
+
+                    if name > advertisment.name {
+                        continue;
+                    } 
 
                     advertiser.set_advertisment(NodeAdvertisment {
                         name: name.clone(),
                         port: None,
                     });
 
-                    let master_address = SocketAddrV4::new(*address.ip(), port);
+                    let master_address = SocketAddrV4::new(*address.ip(), advertised_port);
 
-                    info!("Found master node \"{}\": {}", advertisment.name, master_address);
-
-                    debug!("Waiting to connect...");
-                    // Wait a random amount of time for arbitration.
-                    // The master with the shorter wait time wins!
-                    sleep(Duration::from_millis(rand::random_range(0..=100)));
-                    // TODO: Find a better way to arbitrate masters.
-                    debug!("Connecting...");
-
-                    if let Ok(client) = Client::new_tcp_client(address.ip().octets(), port) {
+                    info!("Found eligible master node \"{}\": {}", advertisment.name, master_address);
+                    
+                    if let Ok(client) = Client::new_tcp_client(address.ip().octets(), advertised_port) {
                         state = State::Client(client);
                         connection_update_channel.send(Role::Slave).unwrap();
                         info!("Successfully connected to master \"{}\"! Now slave.", advertisment.name);
@@ -222,7 +219,7 @@ fn run_node<T: Transmit>(
                     info!("Master is dead!");
 
                     let host = Host::new_tcp_host(0).unwrap();
-                    let port = host.port();
+                    port = host.port();
 
                     advertiser.set_advertisment(NodeAdvertisment {
                         name: name.clone(),
@@ -232,7 +229,7 @@ fn run_node<T: Transmit>(
                     state = State::Host(host);
                     connection_update_channel.send(Role::Master(HashSet::from([name.clone()]))).unwrap();
 
-                    info!("Now master.");
+                    info!("Now master on port {port}.");
                     continue;
                 };
 

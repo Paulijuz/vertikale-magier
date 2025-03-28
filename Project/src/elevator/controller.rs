@@ -31,7 +31,7 @@ pub struct ElevatorState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ElevatorEvent {
     StateUpdated(ElevatorState),
-    RequestCleared(usize, RequestType),
+    RequestsCleared(Vec<(usize, RequestType)>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,19 +167,19 @@ fn clear_floor(
     debug!("Clearing: {direction:?}");
 
     requests.clear(floor, RequestType::Cab);
-    elevator_event_tx
-        .send(ElevatorEvent::RequestCleared(floor, RequestType::Cab))
-        .unwrap();
+    let mut cleared_requests = vec![(floor, RequestType::Cab)];
 
     if let Some(direction) = direction {
         requests.clear(floor, RequestType::Hall(direction));
-        elevator_event_tx
-            .send(ElevatorEvent::RequestCleared(
-                floor,
-                RequestType::Hall(direction),
-            ))
-            .unwrap();
+        cleared_requests.push((floor, RequestType::Hall(direction)));
+    } else {
+        requests.clear(floor, RequestType::Hall(Direction::Up));
+        requests.clear(floor, RequestType::Hall(Direction::Down));
+        cleared_requests.push((floor, RequestType::Hall(Direction::Up)));
+        cleared_requests.push((floor, RequestType::Hall(Direction::Down)));
     }
+
+    elevator_event_tx.send(ElevatorEvent::RequestsCleared(cleared_requests)).unwrap();
 }
 
 /// The main loop for the elevator FSM. It is an event based loop that listen for events from
@@ -226,6 +226,8 @@ pub fn controller_loop(
                     ElevatorCommand::ClearRequest(floor, request_type) => requests.clear(floor, request_type),
                 }
 
+                debug!("{requests:?}");
+                
                 match state.behaviour {
                     Behaviour::DoorOpen => {
                         if should_instantly_clear(state.floor, state.direction, &requests) {

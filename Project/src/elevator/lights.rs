@@ -5,8 +5,6 @@ pub fn set_cab_lights(elevio_driver: &Elevator, requests: &Vec<bool>) {
         let floor = floor as u8;
 
         elevio_driver.call_button_light(floor, CAB, on);
-        elevio_driver.call_button_light(floor, HALL_UP, on);
-        elevio_driver.call_button_light(floor, HALL_DOWN, on);
     }
 }
 

@@ -3,7 +3,11 @@ use log::debug;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap, io::Result, net::SocketAddrV4, thread::{spawn, JoinHandle}, time::{Duration, Instant}
+    collections::HashMap,
+    io::Result,
+    net::SocketAddrV4,
+    thread::{spawn, JoinHandle},
+    time::{Duration, Instant},
 };
 
 use super::client::{Client, Transmit};

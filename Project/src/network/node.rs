@@ -8,7 +8,10 @@ use crossbeam_channel::{never, select, unbounded, Receiver, Sender};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet, net::SocketAddrV4, thread::{sleep, spawn, JoinHandle}, time::Duration
+    collections::HashSet,
+    net::SocketAddrV4,
+    thread::{sleep, spawn, JoinHandle},
+    time::Duration,
 };
 
 // Use 52 for group 52 <3
@@ -43,7 +46,8 @@ pub struct Node<T: Transmit> {
 
 impl<T: Transmit> Node<T> {
     pub fn new(name: String) -> Self {
-        let (connection_upate_channel_tx, connection_upate_channel_rx) = unbounded::<ConnectionUpdate>();
+        let (connection_upate_channel_tx, connection_upate_channel_rx) =
+            unbounded::<ConnectionUpdate>();
         let (from_master_channel_tx, from_master_channel_rx) = unbounded::<T>();
         let (from_slave_channel_tx, from_slave_channel_rx) = unbounded::<T>();
         let (to_master_channel_tx, to_master_channel_rx) = unbounded::<T>();
@@ -124,11 +128,14 @@ fn run_node<T: Transmit>(
         Some(advertisment),
         NODE_ADVERTISMENT_IP,
         NODE_ADVERTISMENT_PORT,
-    ).unwrap();
+    )
+    .unwrap();
     advertiser.start_advertising();
 
     let mut role = Role::Master(host);
-    connection_update_channel.send(ConnectionUpdate::Master(HashSet::from([name.clone()]))).unwrap();
+    connection_update_channel
+        .send(ConnectionUpdate::Master(HashSet::from([name.clone()])))
+        .unwrap();
 
     info!("New node started as master on port {port}.");
 

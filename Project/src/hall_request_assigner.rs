@@ -6,7 +6,8 @@ use crate::{
     elevator::{
         controller::Behaviour,
         requests::{Direction, RequestType},
-    }, worldview::{ElevatorView, RequestStates, RequestStatus}
+    },
+    worldview::{ElevatorView, RequestStates},
 };
 
 #[derive(Debug, Serialize, Deserialize)]

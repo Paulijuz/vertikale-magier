@@ -76,38 +76,34 @@ pub struct RequestStates {
     num_floors: usize,
 }
 
-impl fmt::Display for RequestStates {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Iteration: {}", self.iteration)?;
-        writeln!(f, "Elevators:")?;
+pub fn requests_with_assignments_to_string(request_states: &RequestStates, elevator_views: &HashMap<String, ElevatorView>) -> String {
+    let mut output = String::new();
 
-        // let mut sorted_elevators: Vec<(&String, &ElevatorView)> =
-        // self.elevators.iter().collect::<Vec<_>>();
-        // sorted_elevators.sort_by_key(|(name, _)| *name);
+    output += &format!("Elevators:\n");
 
-        // for (name, elevator_state) in sorted_elevators {
-        //     writeln!(f, "  {name}:")?;
+    let mut sorted_elevators: Vec<(&String, &ElevatorView)> = elevator_views.iter().collect::<Vec<_>>();
+    sorted_elevators.sort_by_key(|(name, _)| *name);
 
-        //     for line in elevator_state.to_string().lines() {
-        //         writeln!(f, "    {line}")?;
-        //     }
-        // }
+    for (name, elevator_state) in sorted_elevators {
+        output += &format!("{name}:\n");
 
-        writeln!(f, "Orders:")?;
-        writeln!(f, "  {:>6} | {:<16} | {:<16}", "Floor", "Down", "Up")?;
-
-        for (floor, hall_request) in self.hall_requests.iter().enumerate().rev() {
-            writeln!(
-                f,
-                "  {:>6} | {:<16} | {:<16}",
-                floor + 1,
-                hall_request.down,
-                hall_request.up,
-            )?;
+        for line in elevator_state.to_string().lines() {
+            output += &format!("  {line}\n");
         }
-
-        Ok(())
     }
+
+    output += &format!("Requests:\n");
+    output += &format!("{:>5} | {:<4} | {:<4}\n", "Floor", "Down", "Up");
+    for (floor, hall_request) in request_states.hall_requests.iter().enumerate() {
+        output += &format!(
+            "{:>5} | {:<4} | {:<4}\n",
+            floor + 1,
+            hall_request.down,
+            hall_request.up,
+        );
+    }
+
+    output
 }
 
 impl RequestStates {

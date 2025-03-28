@@ -1,13 +1,12 @@
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, process::Command};
+use std::{collections::HashMap, fmt, iter::zip, path::Display, process::Command};
 
 use crate::{
     elevator::{
         controller::Behaviour,
         requests::{Direction, RequestType},
-    },
-    worldview::{ElevatorView, RequestStates, RequestStatus},
+    }, network, worldview::{ElevatorView, RequestStates, RequestStatus}
 };
 
 #[derive(Serialize, Deserialize)]
@@ -125,7 +124,7 @@ impl RequestAssignments {
         }
     }
 
-    pub fn requests_for_elevator(&self, name: &String) -> Vec<(bool, usize, RequestType)> {
+    pub fn requests(&self, name: &String) -> Vec<(bool, usize, RequestType)> {
         let hall_up = assignees_to_requests(name, &self.hall_up, RequestType::Hall(Direction::Up));
         let hall_down =
             assignees_to_requests(name, &self.hall_down, RequestType::Hall(Direction::Down));
@@ -143,6 +142,13 @@ impl RequestAssignments {
         } else {
             requests.collect()
         }
+    }
+
+    pub fn different_requests(&self, new: &Self, name: &String) -> Vec<(bool, usize, RequestType)> {
+        zip(self.requests(name), new.requests(name))
+            .filter(|(old_request, new_request)| old_request.0 != new_request.0)
+            .map(|(_, new_request)| new_request)
+            .collect()
     }
 
     pub fn has_assignment(&self, name: &String) -> bool {

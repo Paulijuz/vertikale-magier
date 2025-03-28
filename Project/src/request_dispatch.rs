@@ -7,7 +7,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::backup::save_state_to_file;
+use crate::{backup::save_state_to_file, worldview::requests_with_assignments_to_string};
 use crate::network::Node;
 use crate::worldview::RequestStates;
 use crate::{
@@ -28,7 +28,8 @@ pub enum DispatcherMessage {
     ElevatorState(String, ElevatorState),
     ClearRequest(String, usize, RequestType),
     NewRequest(String, usize, RequestType),
-    Synchronize(String, RequestStates),
+    RequestStates(String, RequestStates),
+    RequestAssignments(String, RequestAssignments),
 }
 
 pub fn run_dispatcher(
@@ -40,7 +41,8 @@ pub fn run_dispatcher(
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
     let mut request_views = inital_worldview.clone();
-    let mut request_assignments = RequestAssignments::new(inital_worldview.hall_requests.len());
+    let mut master_request_assignments = RequestAssignments::new(inital_worldview.hall_requests.len());
+    let mut slave_request_assignments = RequestAssignments::new(inital_worldview.hall_requests.len());
     let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
 
     let deactivation_ticker = tick(Duration::from_millis(1000));
@@ -52,9 +54,27 @@ pub fn run_dispatcher(
                 let message = message.unwrap();
 
                 match message {
-                    DispatcherMessage::Synchronize(name, worldview) => {
-                        info!("Received state from master \"{}\":\n{}", name, request_views);
-                        request_views = worldview;
+                    DispatcherMessage::RequestStates(name, new_request_views) => {
+                        // info!("Received state from master \"{}\":\n{}", name, new_request_views);
+                        request_views = new_request_views;
+
+                        set_cab_lights(&elevio_driver, &request_views.cab_requests_as_bools(&name));
+                        set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
+                    },
+                    DispatcherMessage::RequestAssignments(name, new_request_assignments) => {
+                        // info!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
+
+                        for (active, floor, request_type) in slave_request_assignments.different_requests(&new_request_assignments, &name) {
+                            if active {
+                                error!("{floor} {request_type:?}");
+                                elevator_command_tx.send(ElevatorCommand::AddRequest(floor, request_type)).unwrap();
+                            } else {
+                                elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, request_type)).unwrap();
+                            }
+                        }
+
+                        slave_request_assignments = new_request_assignments.clone();
+                        master_request_assignments = new_request_assignments;
                     },
                     invalid_message => {
                         warn!("Received invalid message from master: {invalid_message:?}");
@@ -62,22 +82,7 @@ pub fn run_dispatcher(
                     },
                 }
 
-                set_cab_lights(&elevio_driver, &request_views.cab_requests_as_bools(&name));
-                set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
-
-                // Sync with the master and send new requests to the elevator controller
-                for (active, floor, request_type) in request_assignments.requests_for_elevator(&name) {
-                    if active {
-                        error!("{floor} {request_type:?}");
-                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, request_type)).unwrap();
-                    } else {
-                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, request_type)).unwrap();
-                    }
-                }
-
-                // if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
-                //     node.to_master_channel().send(local_worldview.clone()).unwrap();
-                // }
+                info!("{}\n", requests_with_assignments_to_string(&request_views, &elevator_views));
             },
             recv(node.from_slave_channel()) -> message => {
                 let message = message.unwrap();
@@ -111,33 +116,37 @@ pub fn run_dispatcher(
                     _ => {},
                 }
 
-                request_views.actiave_all_confirmed();
-
-                match assign_requests(&request_views, &elevator_views) {
-                    Some(new_request_assignment) => request_assignments = new_request_assignment,
-                    None => error!("Could not assign requests."),
-                }
-
                 // if slave_worldview.iteration != master_worldview.iteration {
                 //     warn!("Received invalid worldview. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
                 //     node.to_slaves_channel().send(DispatcherMessage::Synchronize(global_worldview.clone())).unwrap();
                 //     continue;
                 // }
+                request_views.actiave_all_confirmed();
 
-                node.to_slaves_channel().send(DispatcherMessage::Synchronize(name.clone(), request_views.clone())).unwrap();
+                match assign_requests(&request_views, &elevator_views) {
+                    Some(new_request_assignment) => master_request_assignments = new_request_assignment,
+                    None => error!("Could not assign requests."),
+                }
+
+                node.to_slaves_channel().send(DispatcherMessage::RequestStates(name.clone(), request_views.clone())).unwrap();
+                node.to_slaves_channel().send(DispatcherMessage::RequestAssignments(name.clone(), master_request_assignments.clone())).unwrap();
             },
             //Start to inform slaves that master exists
             recv(deactivation_ticker) -> _ => {
                 //Received current timestamp
-                let noew = SystemTime::now();
+                let now = SystemTime::now();
                 let mut changed = false;
 
                 for (name, elevator) in &mut elevator_views {
-                    let Ok(duration) = noew.duration_since(elevator.timestamp_last_event) else {
+                    if !elevator.active {
+                        continue;
+                    }
+
+                    let Ok(duration) = now.duration_since(elevator.timestamp_last_event) else {
                         continue;
                     };
 
-                    if request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
+                    if master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
                         info!("Deactivating {name}. :(");
                         elevator.active = false;
                         changed = true;
@@ -149,7 +158,7 @@ pub fn run_dispatcher(
                     // request_views.iteration += 1;
 
                     //Inform all slaves about new orders
-                    node.to_slaves_channel().send(DispatcherMessage::Synchronize(name.clone(), request_views.clone())).unwrap();
+                    // node.to_slaves_channel().send(DispatcherMessage::RequestStates(name.clone(), request_views.clone())).unwrap();
                 }
             },
             recv(elevator_event_rx) -> elevator_event => {

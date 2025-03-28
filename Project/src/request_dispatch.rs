@@ -22,7 +22,7 @@ use crate::{
 };
 
 const DEACTIVATION_POLL: Duration = Duration::from_millis(100);
-const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
+const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(5000);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {

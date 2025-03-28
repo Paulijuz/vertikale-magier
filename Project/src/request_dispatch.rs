@@ -21,7 +21,7 @@ use crate::{
     worldview::ElevatorView,
 };
 
-const REQUEST_BROADCAST_INTERCA: Duration = Duration::from_millis(50);
+const REQUEST_BROADCAST_INTERVAL: Duration = Duration::from_millis(50);
 const DEACTIVATION_POLL: Duration = Duration::from_millis(100);
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 
@@ -51,7 +51,7 @@ pub fn run_dispatcher(
     let mut newest_elevator_state: Option<ElevatorState> = None;
     let mut role: Role = Role::Master(HashSet::new());
 
-    let request_broadcast_ticker = tick();
+    let request_broadcast_ticker = tick(REQUEST_BROADCAST_INTERVAL);
     let request_timeout_ticker = tick(DEACTIVATION_POLL);
     let call_button_channel = create_call_button_channel(elevio_driver);
 
@@ -165,13 +165,11 @@ pub fn run_dispatcher(
                 }
 
                 let new_requests = master_request_views.set_all_acked_active(&connected_nodes);
-                node.to_slaves_channel().send(Message::RequestStates(master_request_views.clone())).unwrap();
 
                 if new_requests {
                     match assign_requests(&master_request_views, &elevator_views) {
                         Some(new_request_assignment) if master_request_assignments != new_request_assignment => {
                             master_request_assignments = new_request_assignment;
-                            node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
                         }
                         None => error!("Could not assign requests."),
                         _ => {},
@@ -196,8 +194,8 @@ pub fn run_dispatcher(
                 }
             },
             recv(request_broadcast_ticker) -> _ => {
-                let new_requests = master_request_views.set_all_acked_active(&connected_nodes);
                 node.to_slaves_channel().send(Message::RequestStates(master_request_views.clone())).unwrap();
+                node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
             },
             //Start to inform slaves that master exists
             recv(request_timeout_ticker) -> _ => {

@@ -144,7 +144,7 @@ impl RequestAssignments {
         }
     }
 
-    pub fn different_requests(&self, new: &Self, name: &String) -> Vec<(bool, usize, RequestType)> {
+    pub fn new_requests(&self, new: &Self, name: &String) -> Vec<(bool, usize, RequestType)> {
         zip(self.requests(name), new.requests(name))
             .filter(|(old_request, new_request)| old_request.0 != new_request.0)
             .map(|(_, new_request)| new_request)
@@ -166,31 +166,10 @@ pub fn assign_requests(
     request_states: &RequestStates,
     elevator_views: &HashMap<String, ElevatorView>,
 ) -> Option<RequestAssignments> {
-    let num_floors = request_states.hall_requests.len();
+    let num_floors = request_states.num_floors();
 
-    let hall_requests: Vec<(bool, bool)> = request_states
-        .hall_requests
-        .iter()
-        .map(|request| {
-            (
-                request.up == RequestStatus::Active,
-                request.down == RequestStatus::Active,
-            )
-        })
-        .collect();
-
-    let cab_requests: HashMap<String, Vec<bool>> = request_states
-        .cab_requests
-        .iter()
-        .map(|(k, v)| {
-            (
-                k.clone(),
-                v.iter()
-                    .map(|request| *request == RequestStatus::Active)
-                    .collect(),
-            )
-        })
-        .collect();
+    let hall_requests = request_states.hall_requests_as_bools();
+    let cab_requests = request_states.all_cab_requests_as_bools();
 
     let states = elevator_views
         .iter()

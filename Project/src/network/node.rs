@@ -8,9 +8,7 @@ use crossbeam_channel::{never, select, unbounded, Receiver, Sender};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{
-    net::SocketAddrV4,
-    thread::{sleep, spawn, JoinHandle},
-    time::Duration,
+    collections::HashSet, net::SocketAddrV4, thread::{sleep, spawn, JoinHandle}, time::Duration
 };
 
 // Use 52 for group 52 <3
@@ -22,13 +20,19 @@ enum Role<T: Transmit> {
     Slave(Client<T>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConnectionUpdate {
+    Slave,
+    Master(HashSet<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct NodeAdvertisment {
     name: String,
-    port: u16,
+    port: Option<u16>,
 }
 
 pub struct Node<T: Transmit> {
+    connection_upate_channel: Receiver<ConnectionUpdate>,
     from_master_channel: Receiver<T>,
     from_slave_channel: Receiver<T>,
     to_master_channel: Sender<T>,
@@ -39,6 +43,7 @@ pub struct Node<T: Transmit> {
 
 impl<T: Transmit> Node<T> {
     pub fn new(name: String) -> Self {
+        let (connection_upate_channel_tx, connection_upate_channel_rx) = unbounded::<ConnectionUpdate>();
         let (from_master_channel_tx, from_master_channel_rx) = unbounded::<T>();
         let (from_slave_channel_tx, from_slave_channel_rx) = unbounded::<T>();
         let (to_master_channel_tx, to_master_channel_rx) = unbounded::<T>();
@@ -48,6 +53,7 @@ impl<T: Transmit> Node<T> {
         let thread_handle = spawn(move || {
             run_node(
                 name,
+                connection_upate_channel_tx,
                 from_master_channel_tx,
                 from_slave_channel_tx,
                 to_master_channel_rx,
@@ -57,6 +63,7 @@ impl<T: Transmit> Node<T> {
         });
 
         Self {
+            connection_upate_channel: connection_upate_channel_rx,
             from_master_channel: from_master_channel_rx,
             from_slave_channel: from_slave_channel_rx,
             to_master_channel: to_master_channel_tx,
@@ -64,6 +71,10 @@ impl<T: Transmit> Node<T> {
             shutdown_channel: shutdown_channel_tx,
             thread: Some(thread_handle),
         }
+    }
+
+    pub fn connection_update_channel(&self) -> &Receiver<ConnectionUpdate> {
+        &self.connection_upate_channel
     }
 
     pub fn to_master_channel(&self) -> &Sender<T> {
@@ -94,6 +105,7 @@ impl<T: Transmit> Drop for Node<T> {
 
 fn run_node<T: Transmit>(
     name: String,
+    connection_update_channel: Sender<ConnectionUpdate>,
     from_master_channel: Sender<T>,
     from_slave_channel: Sender<T>,
     to_master_channel: Receiver<T>,
@@ -105,19 +117,20 @@ fn run_node<T: Transmit>(
 
     let advertisment = NodeAdvertisment {
         name: name.clone(),
-        port,
+        port: Some(port),
     };
+
     let advertiser = Advertiser::new(
         Some(advertisment),
         NODE_ADVERTISMENT_IP,
         NODE_ADVERTISMENT_PORT,
-    )
-    .unwrap();
+    ).unwrap();
     advertiser.start_advertising();
 
     let mut role = Role::Master(host);
+    connection_update_channel.send(ConnectionUpdate::Master(HashSet::from([name.clone()]))).unwrap();
 
-    info!("New node started as master.");
+    info!("New node started as master on port {port}.");
 
     loop {
         // If the node is a slave it doesn't have a host so we have to set its
@@ -132,33 +145,51 @@ fn run_node<T: Transmit>(
         };
 
         select! {
-            recv(advertiser.receive_channel()) -> advertisment => {
-                let (address, advertisment) = advertisment.unwrap();
+            recv(advertiser.receive_channel()) -> advertisments => {
+                let advertisments = advertisments.unwrap();
 
-                let master_address = SocketAddrV4::new(*address.ip(), advertisment.port);
+                if matches!(role, Role::Slave(_)) {
+                    continue;
+                }
 
-                match &role {
-                    Role::Master(_) => {
-                        info!("Found master node \"{}\": {}", advertisment.name, master_address);
-                        advertiser.stop_advertising();
+                let mut names: HashSet<String> = advertisments.iter().map(|(_, advertisment)| advertisment.name.clone()).collect();
+                names.insert(name.clone());
+                connection_update_channel.send(ConnectionUpdate::Master(names)).unwrap();
 
-                        debug!("Waiting to connect...");
-                        // Wait a random amount of time for arbitration.
-                        // The master with the shorter wait time wins!
-                        sleep(Duration::from_millis(rand::random_range(0..=100)));
-                        // TODO: Find a better way to arbitrate masters.
-                        debug!("Connect...");
+                for (address, advertisment) in advertisments {
+                    let Some(port) = advertisment.port else {
+                        continue;
+                    };
 
-                        if let Ok(client) = Client::new_tcp_client(address.ip().octets(), advertisment.port) {
-                            role = Role::Slave(client);
-                            info!("Successfully connected to master \"{}\"! Now slave.", advertisment.name);
-                            continue;
-                        }
+                    advertiser.set_advertisment(NodeAdvertisment {
+                        name: name.clone(),
+                        port: None,
+                    });
 
-                        info!("Could not connect to master \"{}\".", advertisment.name);
-                        advertiser.start_advertising();
-                    },
-                    _ => {},
+                    let master_address = SocketAddrV4::new(*address.ip(), port);
+
+                    info!("Found master node \"{}\": {}", advertisment.name, master_address);
+
+                    debug!("Waiting to connect...");
+                    // Wait a random amount of time for arbitration.
+                    // The master with the shorter wait time wins!
+                    sleep(Duration::from_millis(rand::random_range(0..=100)));
+                    // TODO: Find a better way to arbitrate masters.
+                    debug!("Connecting...");
+
+                    if let Ok(client) = Client::new_tcp_client(address.ip().octets(), port) {
+                        role = Role::Slave(client);
+                        connection_update_channel.send(ConnectionUpdate::Slave).unwrap();
+                        info!("Successfully connected to master \"{}\"! Now slave.", advertisment.name);
+                        break;
+                    }
+
+                    info!("Could not connect to master \"{}\".", advertisment.name);
+
+                    advertiser.set_advertisment(NodeAdvertisment {
+                        name: name.clone(),
+                        port: Some(port),
+                    });
                 }
             },
             recv(host_receive_channel) -> message => {
@@ -185,14 +216,13 @@ fn run_node<T: Transmit>(
                     let host = Host::new_tcp_host(0).unwrap();
                     let port = host.port();
 
-                    let advertisment = NodeAdvertisment {
+                    advertiser.set_advertisment(NodeAdvertisment {
                         name: name.clone(),
-                        port,
-                    };
-                    advertiser.set_advertisment(advertisment);
-                    advertiser.start_advertising();
+                        port: Some(port),
+                    });
 
                     role = Role::Master(host);
+                    connection_update_channel.send(ConnectionUpdate::Master(HashSet::from([name.clone()]))).unwrap();
 
                     info!("Now master.");
                     continue;

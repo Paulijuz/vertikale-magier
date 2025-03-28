@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, iter::zip, time::SystemTime};
+use std::{cmp::max, collections::{HashMap, HashSet}, fmt, iter::zip, time::SystemTime};
 
 use crate::{elevator::{
     controller::ElevatorState,
@@ -39,8 +39,9 @@ impl fmt::Display for ElevatorView {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RequestStatus {
+    #[default]
     Inactive,
     Pending,
     Active,
@@ -56,23 +57,72 @@ impl fmt::Display for RequestStatus {
     }
 }
 
-impl Default for RequestStatus {
-    fn default() -> Self {
-        Self::Inactive
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct RequestState {
+    pub status: RequestStatus,
+    pub acks: HashSet<String>,
+    pub iteration: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct HallRequest {
-    pub up: RequestStatus,
-    pub down: RequestStatus,
+impl RequestState {
+    fn set_inactive(&mut self, iteration_check: u32) {
+        if self.status != RequestStatus::Active {
+            return;
+        }
+
+        if self.iteration == iteration_check {
+            self.status = RequestStatus::Inactive;
+        }
+    }
+
+    fn set_pending(&mut self) {
+        if self.status != RequestStatus::Inactive {
+            return;
+        }
+
+        self.acks.clear();
+        self.status = RequestStatus::Pending;
+    }
+
+    fn set_active(&mut self, required_acks: &HashSet<String>) {
+        if self.status != RequestStatus::Pending {
+            return;
+        }
+
+        if required_acks.is_subset(&self.acks) {
+            self.iteration += 1;
+            self.status = RequestStatus::Active;
+        }
+    }
+
+    fn add_ack(&mut self, name: String) {
+        self.acks.insert(name);
+    }
+    
+    fn merge(&mut self, other: &Self) -> bool {
+        let new_state = Self {
+            status: max(self.status, other.status),
+            acks: HashSet::new(),
+            iteration: max(self.iteration, other.iteration),
+        };
+
+        let changed = self != &new_state;
+        *self = new_state;
+
+        changed
+    }
+
+    fn as_bool(&self) -> bool {
+        self.status == RequestStatus::Active
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestStates {
-    pub cab_requests: HashMap<String, Vec<RequestStatus>>, // List of all active elevators
-    pub hall_requests: Vec<HallRequest>,
-    pub iteration: i32,
+    cab: HashMap<String, Vec<RequestState>>, // List of all active elevators
+    hall_up: Vec<RequestState>,
+    hall_down: Vec<RequestState>,
+    iteration: i32,
     num_floors: usize,
 }
 
@@ -99,12 +149,12 @@ pub fn system_state_to_string(request_states: &RequestStates, request_assignment
 
     output += &format!("Requests:\n");
     output += &format!("{:>5} | {:<4} | {:<4}\n", "Floor", "Down", "Up");
-    for (floor, hall_request) in request_states.hall_requests.iter().enumerate() {
+    for (floor, (up, down)) in zip(&request_states.hall_up, &request_states.hall_down).enumerate() {
         output += &format!(
             "{:>5} | {:<4} | {:<4}\n",
             floor + 1,
-            hall_request.down,
-            hall_request.up,
+            down.status,
+            up.status,
         );
     }
 
@@ -114,86 +164,100 @@ pub fn system_state_to_string(request_states: &RequestStates, request_assignment
 impl RequestStates {
     pub fn new(num_floors: usize) -> Self {
         Self {
-            cab_requests: HashMap::new(),
-            hall_requests: vec![HallRequest::default(); num_floors],
+            cab: HashMap::new(),
+            hall_up: vec![RequestState::default(); num_floors],
+            hall_down: vec![RequestState::default(); num_floors],
             num_floors,
             iteration: 0,
         }
     }
+
+    pub fn num_floors(&self) -> usize {
+        self.num_floors
+    }
+
+    fn request_state_mut(&mut self, floor: usize, name: String, request_type: RequestType) -> &mut RequestState {
+        match request_type {
+            RequestType::Hall(Direction::Up) => &mut self.hall_up[floor],
+            RequestType::Hall(Direction::Down) => &mut self.hall_down[floor],
+            RequestType::Cab => {
+                &mut self.cab
+                    .entry(name)
+                    .or_insert(vec![RequestState::default(); self.num_floors])[floor]
+            },
+        }
+    }
+
+    pub fn set_inactive(&mut self, floor: usize, name: String, request_type: RequestType, iteration_check: u32) {
+        self.request_state_mut(floor, name, request_type).set_inactive(iteration_check);
+    }
+
     pub fn set_pending(&mut self, floor: usize, name: String, request_type: RequestType) {
-        match request_type {
-            RequestType::Hall(Direction::Up) => {
-                self.hall_requests[floor].up = RequestStatus::Pending
-            }
-            RequestType::Hall(Direction::Down) => {
-                self.hall_requests[floor].down = RequestStatus::Pending
-            }
-            RequestType::Cab => {
-                self.cab_requests
-                    .entry(name)
-                    .or_insert(vec![RequestStatus::Inactive; self.num_floors])[floor] =
-                    RequestStatus::Pending
-            }
-        }
+        self.request_state_mut(floor, name, request_type).set_pending();
     }
 
-    pub fn set_inactive(&mut self, floor: usize, name: String, request_type: RequestType) {
-        match request_type {
-            RequestType::Hall(Direction::Up) => {
-                self.hall_requests[floor].up = RequestStatus::Inactive
-            }
-            RequestType::Hall(Direction::Down) => {
-                self.hall_requests[floor].down = RequestStatus::Inactive
-            }
-            RequestType::Cab => {
-                self.cab_requests
-                    .entry(name)
-                    .or_insert(vec![RequestStatus::Inactive; self.num_floors])[floor] =
-                    RequestStatus::Inactive
-            }
-        }
-    }
-
-    pub fn actiave_all_confirmed(&mut self) {
-        for cab_requests in self.cab_requests.values_mut() {
+    pub fn set_all_acked_active(&mut self, required_acks: &HashSet<String>) {
+        for cab_requests in self.cab.values_mut() {
             for cab_request in cab_requests {
-                if *cab_request == RequestStatus::Pending {
-                    *cab_request = RequestStatus::Active;
-                }
+                cab_request.set_active(required_acks);
             }
         }
 
-        for hall_request in &mut self.hall_requests {
-            if hall_request.up == RequestStatus::Pending {
-                hall_request.up = RequestStatus::Active;
-            }
+        for hall_up_request in &mut self.hall_up {
+            hall_up_request.set_active(required_acks);
+        }
 
-            if hall_request.down == RequestStatus::Pending {
-                hall_request.down = RequestStatus::Active;
+        for hall_down_request in &mut self.hall_down {
+            hall_down_request.set_active(required_acks);
+        }
+    }
+
+    pub fn merge(&mut self, other: &Self) -> bool {
+        let changed = false;
+
+        for name in self.cab.clone().keys().chain(other.cab.keys()) {
+            let Some(self_cab_requests) = self.cab.get_mut(name) else {
+                continue;
+            };
+
+            let Some(other_cab_requests) = other.cab.get(name) else {
+                continue;
+            };
+
+            for (self_cab_request, other_cab_request) in zip(self_cab_requests, other_cab_requests) {
+                self_cab_request.merge(other_cab_request);
             }
         }
+
+        for (self_hall_up_state, other_hall_up_state) in zip(&mut self.hall_up, &other.hall_up) {
+            self_hall_up_state.merge(other_hall_up_state);
+        }
+
+        for (self_hall_down_state, other_hall_down_state) in zip(&mut self.hall_down, &other.hall_down) {
+            self_hall_down_state.merge(other_hall_down_state);
+        }
+
+        changed
     }
 
     pub fn hall_requests_as_bools(&self) -> Vec<(bool, bool)> {
-        self.hall_requests
-            .iter()
-            .map(|request| {
-                (
-                    request.up == RequestStatus::Active,
-                    request.down == RequestStatus::Active,
-                )
-            })
+        zip(&self.hall_up, &self.hall_down)
+            .map(|(up, down)| (up.as_bool(), down.as_bool()))
             .collect()
     }
 
     pub fn cab_requests_as_bools(&self, name: &String) -> Vec<bool> {
-        self.cab_requests
+        self.cab
             .get(name)
-            .map_or(vec![false; self.hall_requests.len()], |requessts| {
-                requessts
+            .map_or(vec![false; self.num_floors], |requests| {
+                requests
                     .iter()
-                    .map(|request| *request == RequestStatus::Active)
+                    .map(|request| request.as_bool())
                     .collect()
             })
+    }
+
+    pub fn all_cab_requests_as_bools(&self) -> HashMap<String, Vec<bool>> {
+        self.cab.keys().map(|name| (name.clone(), self.cab_requests_as_bools(name))).collect()
     }
 }

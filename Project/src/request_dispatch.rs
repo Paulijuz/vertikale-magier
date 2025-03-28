@@ -3,12 +3,12 @@ use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     time::{Duration, SystemTime},
 };
 
 use crate::{backup::save_state_to_file, worldview::system_state_to_string};
-use crate::network::Node;
+use crate::network::{Node, ConnectionUpdate};
 use crate::worldview::RequestStates;
 use crate::{
     elevator::{
@@ -41,9 +41,10 @@ pub fn run_dispatcher(
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
     let mut request_views = inital_worldview.clone();
-    let mut master_request_assignments = RequestAssignments::new(inital_worldview.hall_requests.len());
-    let mut slave_request_assignments = RequestAssignments::new(inital_worldview.hall_requests.len());
+    let mut master_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
+    let mut slave_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
     let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
+    let mut connected_nodes: HashSet<String> = HashSet::new();
 
     let deactivation_ticker = tick(Duration::from_millis(1000));
     let call_button_channel = create_call_button_channel(elevio_driver);
@@ -55,16 +56,16 @@ pub fn run_dispatcher(
 
                 match message {
                     Message::RequestStates(new_request_views) => {
-                        // info!("Received state from master \"{}\":\n{}", name, new_request_views);
+                        info!("Received state from master \"{}\":\n{:?}", name, new_request_views);
                         request_views = new_request_views;
 
                         set_cab_lights(&elevio_driver, &request_views.cab_requests_as_bools(&name));
                         set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
                     },
                     Message::RequestAssignments(new_request_assignments) => {
-                        error!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
+                        info!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
 
-                        for (active, floor, request_type) in slave_request_assignments.different_requests(&new_request_assignments, &name) {
+                        for (active, floor, request_type) in slave_request_assignments.new_requests(&new_request_assignments, &name) {
                             if active {
                                 error!("{floor} {request_type:?}");
                                 elevator_command_tx.send(ElevatorCommand::AddRequest(floor, request_type)).unwrap();
@@ -88,7 +89,7 @@ pub fn run_dispatcher(
                 let message = message.unwrap();
 
                 info!("Received message from slave: {message:?}");
-
+                
                 match message {
                     Message::ElevatorState(name, state) => {
                         // If we have received a message from a deactivated slave, we can
@@ -111,7 +112,7 @@ pub fn run_dispatcher(
                         request_views.set_pending(floor, name, request_type);
                     },
                     Message::ClearRequest(name, floor, request_type) => {
-                        request_views.set_inactive(floor, name, request_type);
+                        // request_views.set_inactive(floor, name, request_type, 0);
                     },
                     _ => {},
                 }
@@ -121,7 +122,7 @@ pub fn run_dispatcher(
                 //     node.to_slaves_channel().send(DispatcherMessage::Synchronize(global_worldview.clone())).unwrap();
                 //     continue;
                 // }
-                request_views.actiave_all_confirmed();
+                request_views.set_all_acked_active(&connected_nodes);
 
                 match assign_requests(&request_views, &elevator_views) {
                     Some(new_request_assignment) => master_request_assignments = new_request_assignment,
@@ -130,6 +131,20 @@ pub fn run_dispatcher(
 
                 node.to_slaves_channel().send(Message::RequestStates(request_views.clone())).unwrap();
                 node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
+            },
+            recv(node.connection_update_channel()) -> connection_update => {
+                let connection_update = connection_update.unwrap();
+
+                match connection_update {
+                    ConnectionUpdate::Slave => {
+                        connected_nodes.clear();
+                    },
+                    ConnectionUpdate::Master(nodes) if nodes != connected_nodes => {
+                        connected_nodes = nodes;
+                        info!("Connected nodes: {connected_nodes:?}");
+                    },
+                    _ => {},
+                }
             },
             //Start to inform slaves that master exists
             recv(deactivation_ticker) -> _ => {
@@ -154,11 +169,12 @@ pub fn run_dispatcher(
                 }
 
                 if changed {
-                    // request_views.assign_requests(&elevator_views);
-                    // request_views.iteration += 1;
-
-                    //Inform all slaves about new orders
-                    // node.to_slaves_channel().send(DispatcherMessage::RequestStates(name.clone(), request_views.clone())).unwrap();
+                    match assign_requests(&request_views, &elevator_views) {
+                        Some(new_request_assignment) => master_request_assignments = new_request_assignment,
+                        None => error!("Could not assign requests."),
+                    }
+    
+                    node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
                 }
             },
             recv(elevator_event_rx) -> elevator_event => {

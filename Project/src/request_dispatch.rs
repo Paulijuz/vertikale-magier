@@ -1,6 +1,6 @@
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
-use log::{error, info, warn};
+use log::{error, info, warn, debug};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -45,7 +45,7 @@ pub fn run_dispatcher(
     let mut request_views = inital_worldview;
     let mut request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
     let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
-    let mut connected_nodes: HashSet<String> = HashSet::new();
+    let mut role: Role = Role::Master(HashSet::new());
 
     let deactivation_ticker = tick(DEACTIVATION_POLL);
     let call_button_channel = create_call_button_channel(elevio_driver);
@@ -60,7 +60,7 @@ pub fn run_dispatcher(
 
                 match message {
                     Message::RequestStates(new_request_views) => {
-                        // info!("Received state from master \"{}\":\n{:?}", name, new_request_views);
+                        debug!("Received state from master \"{}\":\n{:?}", name, new_request_views);
                         request_views = new_request_views;
 
                         let not_acked = request_views.not_acked(&name);
@@ -73,8 +73,8 @@ pub fn run_dispatcher(
                         set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
                     },
                     Message::RequestAssignments(new_request_assignments) => {
-                        // info!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
-                        request_assignments = request_assignments;
+                        debug!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
+                        request_assignments = new_request_assignments;
 
                         for (active, floor, request_type) in request_assignments.requests(&name) {
                             if active {
@@ -94,6 +94,11 @@ pub fn run_dispatcher(
             },
             recv(node.from_slave_channel()) -> message => {
                 let message = message.unwrap();
+
+                let Role::Master(connected_nodes) = &role else {
+                    warn!("Received message from slave while being a master: {message:?}");
+                    continue;
+                };
 
                 info!("Received message from slave: {message:?}");
 
@@ -154,22 +159,21 @@ pub fn run_dispatcher(
                 node.to_slaves_channel().send(Message::RequestStates(request_views.clone())).unwrap();
             },
             recv(node.connection_update_channel()) -> connection_update => {
-                let connection_update = connection_update.unwrap();
+                let new_role = connection_update.unwrap();
 
-                match connection_update {
-                    Role::Slave => {
-                        connected_nodes.clear();
-                    },
-                    Role::Master(nodes) if nodes != connected_nodes => {
-                        connected_nodes = nodes;
+                if role != new_role {
+                    role = new_role;
+
+                    if let Role::Master(connected_nodes) = &role {
                         info!("Connected nodes: {connected_nodes:?}");
-                    },
-                    _ => {},
+                    }
                 }
             },
             //Start to inform slaves that master exists
             recv(deactivation_ticker) -> _ => {
-                
+                if role == Role::Slave {
+                    continue;
+                }
 
                 //Received current timestamp
                 let now = SystemTime::now();

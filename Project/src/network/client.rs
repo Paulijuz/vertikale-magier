@@ -67,6 +67,10 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             break;
         }
 
+        // On some machines, when multiple clients are connected to each other, sometimes
+        // the receiver ip address is not available. Simply giving a random port in that case
+        // with an invalid ip is good enough in our case as we simple use the ip as unique 
+        // identifiers.
         let address = address
             .as_socket_ipv4()
             .unwrap_or(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));

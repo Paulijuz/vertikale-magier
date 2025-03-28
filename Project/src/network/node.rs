@@ -23,12 +23,13 @@ enum State<T: Transmit> {
     Client(Client<T>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Role {
     Slave,
     Master(HashSet<String>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 struct NodeAdvertisment {
     name: String,
     port: Option<u16>,

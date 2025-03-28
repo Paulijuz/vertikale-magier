@@ -108,6 +108,8 @@ pub fn run_dispatcher(
 
                 info!("Received message from slave: {message:?}");
 
+                let mut changed = false;
+
                 match message {
                     Message::ElevatorState(name, state) => {
                         // If we have received a message from a deactivated slave, we can
@@ -131,8 +133,6 @@ pub fn run_dispatcher(
                         }
                     },
                     Message::ClearRequests(name, requests) => {
-                        let mut changed = false;
-
                         for (floor, request_type, iteration) in requests {
                             changed |= master_request_views.set_inactive(floor, name.clone(), request_type, iteration);
                         }
@@ -149,8 +149,6 @@ pub fn run_dispatcher(
 
                     },
                     Message::Acks(name, requests) => {
-                        let mut changed = false;
-
                         for (request_name, floor, request_type, iteration_check) in requests{
                             changed |= master_request_views.add_ack(floor, request_name, request_type, name.clone(), iteration_check);
                         }
@@ -163,16 +161,18 @@ pub fn run_dispatcher(
                     _ => {},
                 }
 
-                master_request_views.set_all_acked_active(&connected_nodes);
+                changed |= master_request_views.set_all_acked_active(&connected_nodes);
                 node.to_slaves_channel().send(Message::RequestStates(master_request_views.clone())).unwrap();
 
-                match assign_requests(&master_request_views, &elevator_views) {
-                    Some(new_request_assignment) if master_request_assignments != new_request_assignment => {
-                        master_request_assignments = new_request_assignment;
-                        node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
+                if changed {
+                    match assign_requests(&master_request_views, &elevator_views) {
+                        Some(new_request_assignment) if master_request_assignments != new_request_assignment => {
+                            master_request_assignments = new_request_assignment;
+                            node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
+                        }
+                        None => error!("Could not assign requests."),
+                        _ => {},
                     }
-                    None => error!("Could not assign requests."),
-                    _ => {},
                 }
 
             },

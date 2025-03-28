@@ -101,49 +101,42 @@ fn should_instantly_clear(floor: usize, direction: Option<Direction>, requests: 
 fn start_motor(
     elevio_driver: &elevio::elev::Elevator,
     direction: Option<Direction>,
-) -> Result<(), ()> {
+) {
     match direction {
         Some(Direction::Up) => elevio_driver.motor_direction(elevio::elev::DIRN_UP),
         Some(Direction::Down) => elevio_driver.motor_direction(elevio::elev::DIRN_DOWN),
-        None => return Err(()),
+        None => return,
     }
-
-    Ok(())
 }
 
 /// Tries opening the elevator door. Will return an error if the elevator is
 /// not stopped at a floor.
-fn open_door(elevio_driver: &elevio::elev::Elevator) -> Result<(), ()> {
+fn open_door(elevio_driver: &elevio::elev::Elevator) {
     // There is no way to check that the motor is stopped with elevio,
     // so we'll just set the motor to be stopped to be sure.
     elevio_driver.motor_direction(elevio::elev::DIRN_STOP);
 
     if elevio_driver.floor_sensor().is_none() {
         warn!("Tried opening door while not stopped at a floor.");
-        return Err(());
+        return;
     }
 
     elevio_driver.door_light(true);
     debug!("Door open.");
-
-    Ok(())
 }
 
 /// Tries closing the elevator door. Will return an error if the door is obstructed.
-fn close_door(elevio_driver: &elevio::elev::Elevator) -> Result<(), ()> {
+fn close_door(elevio_driver: &elevio::elev::Elevator) {
     if elevio_driver.obstruction() {
         warn!("Tried closing door while obstructed.");
-        return Err(());
     }
 
     elevio_driver.door_light(false);
     debug!("Door closed.");
-
-    Ok(())
 }
 
-//Initialize the elevator position to the bottom floor
-fn initialize_elevator_position(elevio_driver: &elevio::elev::Elevator) -> usize {
+/// Initialize the elevator position to the first flow it hits going downwards.
+pub fn initialize_elevator_position(elevio_driver: &elevio::elev::Elevator) -> usize {
     debug!("Initializing elevator position.");
     elevio_driver.motor_direction(elevio::elev::DIRN_DOWN);
 
@@ -158,6 +151,7 @@ fn initialize_elevator_position(elevio_driver: &elevio::elev::Elevator) -> usize
     }
 }
 
+/// Clears the floor the elevator is at and send corresponding elevator event. 
 fn clear_floor(
     requests: &mut Requests,
     elevator_event_tx: &cbc::Sender<ElevatorEvent>,
@@ -188,11 +182,10 @@ fn clear_floor(
 /// **Note:** This function blocks execution.
 pub fn controller_loop(
     elevio_driver: &elevio::elev::Elevator,
+    inital_floor: usize,
     elevator_command_rx: cbc::Receiver<ElevatorCommand>,
     elevator_event_tx: cbc::Sender<ElevatorEvent>,
 ) {
-    let inital_floor = initialize_elevator_position(elevio_driver);
-
     let floor_sensor_channel = create_floor_sensor_channel(elevio_driver);
     let obstruction_channel = create_obstruction_channel(elevio_driver);
     let stop_button_channel = create_stop_button_channel(elevio_driver);
@@ -226,8 +219,6 @@ pub fn controller_loop(
                     ElevatorCommand::ClearRequest(floor, request_type) => requests.clear(floor, request_type),
                 }
 
-                debug!("{requests:?}");
-                
                 match state.behaviour {
                     Behaviour::DoorOpen => {
                         if should_instantly_clear(state.floor, state.direction, &requests) {

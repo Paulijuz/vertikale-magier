@@ -35,6 +35,10 @@ struct NodeAdvertisment {
     port: Option<u16>,
 }
 
+/// A node represent one communicating part of the network.
+/// It implements master slave logic internally to simplify the interface.
+/// It exposes channels for sending/receiving to/from the master and 
+/// sending/receiving to/from the slaves. 
 pub struct Node<T: Transmit> {
     connection_upate_channel: Receiver<Role>,
     from_master_channel: Receiver<T>,

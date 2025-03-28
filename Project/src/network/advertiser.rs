@@ -25,6 +25,8 @@ enum AdvertiserCommand<T> {
     Exit,
 }
 
+/// The advertiser is a simple utility which uses a UDP `client`
+/// to repeatedly send an "advertisment" for other advertiser to pick up.
 pub struct Advertiser<T: Transmit + PartialEq + Eq + Hash> {
     control_channel_tx: Sender<AdvertiserCommand<T>>,
     receive_channel_rx: Receiver<HashSet<(SocketAddrV4, T)>>,

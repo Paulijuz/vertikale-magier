@@ -19,6 +19,8 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
 pub trait Transmit: Serialize + de::DeserializeOwned + Clone + Send + 'static {}
 impl<T: Serialize + de::DeserializeOwned + Clone + Send + 'static> Transmit for T {}
 
+/// The building block of our network module. 
+/// It be both used for TCP and UDP.
 pub struct Client<T: Transmit> {
     socket: Socket,
     send_channel: Option<Sender<T>>,

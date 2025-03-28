@@ -22,8 +22,8 @@ use crate::{
 };
 
 const DEACTIVATION_POLL: Duration = Duration::from_millis(100);
-const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(5000);
-const ELEVATOR_TIMEIN: Duration = Duration::from_millis(15000);
+const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(4000);
+const ELEVATOR_TIMEIN: Duration = Duration::from_millis(14000);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
@@ -35,6 +35,13 @@ pub enum Message {
     RequestAssignments(RequestAssignments),
 }
 
+/// The dispatcher is the brains of the project.
+/// It assigns and distributes order according to the 
+/// button presses and elevator states it receives.
+/// 
+/// Under normal cirmucstances, one of the dispatcher will be the mater
+/// and the others slaves (altough the master loopbacks all messages to slaves
+/// back to iself so in a way it's both a slave and a master).
 pub fn run_dispatcher(
     name: String,
     node: Node<Message>,
@@ -64,7 +71,6 @@ pub fn run_dispatcher(
 
                 match message {
                     Message::RequestStates(new_request_views) => {
-                        // debug!("Received state from master \"{}\":\n{:?}", name, new_request_views);
                         slave_request_views = new_request_views;
 
                         let not_acked = slave_request_views.not_acked(&name);
@@ -77,7 +83,6 @@ pub fn run_dispatcher(
                         set_hall_lights(&elevio_driver, &slave_request_views.hall_requests_as_bools());
                     },
                     Message::RequestAssignments(new_request_assignments) => {
-                        // debug!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
                         slave_request_assignments = new_request_assignments;
 
                         for (active, floor, request_type) in slave_request_assignments.requests(&name) {

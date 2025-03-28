@@ -23,13 +23,6 @@ pub struct ElevatorView {
 }
 impl fmt::Display for ElevatorView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // let cab_requests_string = self
-        //     .cab_requests
-        //     .iter()
-        //     .map(|&v| if v { "*" } else { "-" })
-        //     .collect::<Vec<_>>()
-        //     .join(" ");
-
         let age = match SystemTime::now().duration_since(self.timestamp_last_event) {
             Ok(age) => age.as_secs().to_string(),
             Err(_) => String::from("From the future"),
@@ -37,13 +30,12 @@ impl fmt::Display for ElevatorView {
 
         writeln!(
             f,
-            "Age: {} s\nActive: {}\nState: {:?}\nDirection: {:?}\nFloor: {}", //\nInternal orders:\n  1 2 3 4\n  {}",
+            "Age: {} s\nActive: {}\nState: {:?}\nDirection: {:?}\nFloor: {}",
             age,
             self.active,
             self.state.behaviour,
             self.state.direction,
             self.state.floor + 1,
-            // cab_requests_string,
         )
     }
 }

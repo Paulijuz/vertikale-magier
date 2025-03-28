@@ -60,6 +60,9 @@ fn main() {
         }
     };
 
+    elevator::lights::clear_all_lights(&elevio_driver);
+    let inital_floor = elevator::controller::initialize_elevator_position(&elevio_driver);
+
     let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
 
     let node = network::Node::<request_dispatch::Message>::new(name.clone());
@@ -72,6 +75,7 @@ fn main() {
         spawn(move || {
             elevator::controller::controller_loop(
                 &elevio_driver,
+                inital_floor,
                 elevator_command_rx,
                 elevator_event_tx,
             )

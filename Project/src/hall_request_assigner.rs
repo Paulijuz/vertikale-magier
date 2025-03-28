@@ -97,7 +97,7 @@ fn create_hra_state(elevator_view: &ElevatorView, cab_requests: &Vec<bool>) -> H
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestAssignments {
     pub hall_up: Vec<Option<String>>,
     pub hall_down: Vec<Option<String>>,

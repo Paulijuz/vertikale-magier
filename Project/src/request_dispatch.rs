@@ -163,16 +163,18 @@ pub fn run_dispatcher(
                     _ => {},
                 }
 
-                if master_request_views.set_all_acked_active(&connected_nodes) {
-                    match assign_requests(&master_request_views, &elevator_views) {
-                        Some(new_request_assignment) => master_request_assignments = new_request_assignment,
-                        None => error!("Could not assign requests."),
-                    }
+                master_request_views.set_all_acked_active(&connected_nodes);
+                node.to_slaves_channel().send(Message::RequestStates(master_request_views.clone())).unwrap();
 
-                    node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
+                match assign_requests(&master_request_views, &elevator_views) {
+                    Some(new_request_assignment) if master_request_assignments != new_request_assignment => {
+                        master_request_assignments = new_request_assignment;
+                        node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
+                    }
+                    None => error!("Could not assign requests."),
+                    _ => {},
                 }
 
-                node.to_slaves_channel().send(Message::RequestStates(master_request_views.clone())).unwrap();
             },
             recv(node.connection_update_channel()) -> connection_update => {
                 let new_role = connection_update.unwrap();
@@ -207,12 +209,12 @@ pub fn run_dispatcher(
 
                     if elevator.active && master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
                         info!("Deactivating {name}. :(");
-                        // elevator.active = false;
-                        // changed = true;
+                        elevator.active = false;
+                        changed = true;
                     } else if !elevator.active && duration < ELEVATOR_TIMEOUT {
                         info!("Activating {name}. :)");
                         elevator.active = true;
-                        // changed = true;
+                        changed = true;
                     }
                 }
 

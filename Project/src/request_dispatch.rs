@@ -7,7 +7,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::network::{Role, Node};
+use crate::{network::{Node, Role}, worldview::num_active_elevators};
 use crate::worldview::RequestStates;
 use crate::{backup::save_state_to_file, worldview::system_state_to_string};
 use crate::{
@@ -212,13 +212,15 @@ pub fn run_dispatcher(
                 //Received current timestamp
                 let now = SystemTime::now();
                 let mut changed = false;
+                
+                let num_active = num_active_elevators(&elevator_views);
 
                 for (name, elevator) in &mut elevator_views {
                     let Ok(duration) = now.duration_since(elevator.timestamp_last_event) else {
                         continue;
                     };
 
-                    if elevator.active && master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
+                    if elevator.active && master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT && num_active > 1 {
                         info!("Deactivating {name}. :(");
                         elevator.active = false;
                         changed = true;

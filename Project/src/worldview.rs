@@ -21,6 +21,19 @@ pub struct ElevatorView {
     pub active: bool,
     pub timestamp_last_event: SystemTime,
 }
+
+pub fn num_active_elevators(elevator_views: &HashMap<String, ElevatorView>) -> u32 {
+    let mut num_active = 0;
+
+    for (elevator_view) in elevator_views.values() {
+        if elevator_view.active {
+            num_active += 1;
+        }
+    }
+
+    num_active
+}
+
 impl fmt::Display for ElevatorView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let age = match SystemTime::now().duration_since(self.timestamp_last_event) {

@@ -50,7 +50,7 @@ pub fn run_dispatcher(
     let mut newest_elevator_state: Option<ElevatorState> = None;
     let mut role: Role = Role::Master(HashSet::new());
 
-    let deactivation_ticker = tick(DEACTIVATION_POLL);
+    let request_timeout_ticker = tick(DEACTIVATION_POLL);
     let call_button_channel = create_call_button_channel(elevio_driver);
 
     set_cab_lights(&elevio_driver, &slave_request_views.cab_requests_as_bools(&name));
@@ -113,18 +113,16 @@ pub fn run_dispatcher(
                         // If we have received a message from a deactivated slave, we can
                         // assume that it is alive and activate it again
                         if let Some(elevator) = elevator_views.get_mut(&name) {
-                            if !elevator.active {
-                                info!("Activating \"{}\" :)", name);
-                            }
+                            elevator.state = state;
+                            elevator.timestamp_last_event = SystemTime::now();
                         } else {
                             info!("New slave \"{}\" connected.", name);
+                            elevator_views.insert(name, ElevatorView {
+                                active: false,
+                                state,
+                                timestamp_last_event: SystemTime::now(),
+                            });
                         }
-
-                        elevator_views.insert(name, ElevatorView {
-                            active: true,
-                            state,
-                            timestamp_last_event: SystemTime::now(),
-                        });
                     },
                     Message::NewRequest(name, floor, request_type) => {
                         if !master_request_views.set_pending(floor, name, request_type) {
@@ -146,11 +144,7 @@ pub fn run_dispatcher(
 
                         // If we recieve a clear floor from an elevator we can be sure it's alive.
                         if let Some(elevator) = elevator_views.get_mut(&name) {
-                            if !elevator.active {
-                                info!("Activating \"{}\" :)", name);
-                                elevator.active = true;
-                                elevator.timestamp_last_event = SystemTime::now();
-                            }
+                            elevator.timestamp_last_event = SystemTime::now();
                         }
 
                     },
@@ -197,7 +191,7 @@ pub fn run_dispatcher(
                 }
             },
             //Start to inform slaves that master exists
-            recv(deactivation_ticker) -> _ => {
+            recv(request_timeout_ticker) -> _ => {
                 if role == Role::Slave {
                     continue;
                 }
@@ -207,16 +201,16 @@ pub fn run_dispatcher(
                 let mut changed = false;
 
                 for (name, elevator) in &mut elevator_views {
-                    if !elevator.active {
-                        continue;
-                    }
-
                     let Ok(duration) = now.duration_since(elevator.timestamp_last_event) else {
                         continue;
                     };
 
-                    if master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
+                    if elevator.active && master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
                         info!("Deactivating {name}. :(");
+                        elevator.active = false;
+                        changed = true;
+                    } else if !elevator.active && duration < ELEVATOR_TIMEOUT {
+                        info!("Activating {name}. :)");
                         elevator.active = false;
                         changed = true;
                     }
@@ -239,6 +233,7 @@ pub fn run_dispatcher(
                         Message::ClearRequests(name.clone(), requests.iter().map(|&(floor, request_type)| (floor, request_type, slave_request_views.iteration(floor, &name, request_type))).collect())
                     },
                     ElevatorEvent::StateUpdated(state) => {
+                        newest_elevator_state = Some(state.clone());
                         Message::ElevatorState(name.clone(), state)
                     },
                 };

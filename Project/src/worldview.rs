@@ -1,13 +1,12 @@
-use log::error;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, time::SystemTime};
 
 use crate::{
     elevator::{
         controller::{Behaviour, ElevatorState},
-        requests::{Direction, RequestType, Requests},
+        requests::{Direction, RequestType},
     },
-    hall_request_assigner::{run_hall_request_assigner, HraBehaviour, HraDirection, HraState},
+    hall_request_assigner::{HraBehaviour, HraDirection, HraState},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -16,24 +15,6 @@ pub struct ElevatorView {
     pub active: bool,
     pub timestamp_last_event: SystemTime,
 }
-
-fn create_hra_state(elevator_view: &ElevatorView, cab_requests: &Vec<bool>) -> HraState {
-    HraState {
-        behaviour: match elevator_view.state.behaviour {
-            Behaviour::DoorOpen => HraBehaviour::DoorOpen,
-            Behaviour::Moving => HraBehaviour::Moving,
-            _ => HraBehaviour::Idle,
-        },
-        floor: elevator_view.state.floor,
-        direction: match elevator_view.state.direction {
-            Some(Direction::Down) => HraDirection::Down,
-            None => HraDirection::Stop,
-            Some(Direction::Up) => HraDirection::Up,
-        },
-        cab_requests: cab_requests.clone(),
-    }
-}
-
 impl fmt::Display for ElevatorView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // let cab_requests_string = self
@@ -62,23 +43,23 @@ impl fmt::Display for ElevatorView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum HallRequestState {
+pub enum RequestStatus {
     Inactive,
-    Requested,
-    Assigned(String),
+    Pending,
+    Active,
 }
 
-impl fmt::Display for HallRequestState {
+impl fmt::Display for RequestStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Inactive => f.pad("-"),
-            Self::Assigned(assignee) => f.pad(&format!("* ({assignee})")),
-            Self::Requested => f.pad("* (-)"),
+            Self::Pending => f.pad("~"),
+            Self::Active => f.pad("*"),
         }
     }
 }
 
-impl Default for HallRequestState {
+impl Default for RequestStatus {
     fn default() -> Self {
         Self::Inactive
     }
@@ -86,19 +67,19 @@ impl Default for HallRequestState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct HallRequest {
-    pub up: HallRequestState,
-    pub down: HallRequestState,
+    pub up: RequestStatus,
+    pub down: RequestStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Worldview {
-    pub cab_requests: HashMap<String, Vec<bool>>, // List of all active elevators
+pub struct RequestStates {
+    pub cab_requests: HashMap<String, Vec<RequestStatus>>, // List of all active elevators
     pub hall_requests: Vec<HallRequest>,
     pub iteration: i32,
     num_floors: usize,
 }
 
-impl fmt::Display for Worldview {
+impl fmt::Display for RequestStates {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Iteration: {}", self.iteration)?;
         writeln!(f, "Elevators:")?;
@@ -132,7 +113,7 @@ impl fmt::Display for Worldview {
     }
 }
 
-impl Worldview {
+impl RequestStates {
     pub fn new(num_floors: usize) -> Self {
         Self {
             cab_requests: HashMap::new(),
@@ -141,81 +122,48 @@ impl Worldview {
             iteration: 0,
         }
     }
-    pub fn add_request(&mut self, floor: usize, name: String, request_type: RequestType) {
+    pub fn set_pending(&mut self, floor: usize, name: String, request_type: RequestType) {
         match request_type {
-            RequestType::Hall(Direction::Up) => self.hall_requests[floor].up = HallRequestState::Requested,
-            RequestType::Hall(Direction::Down) => self.hall_requests[floor].down = HallRequestState::Requested,
-            RequestType::Cab => self.cab_requests.entry(name).or_insert(vec![false; self.num_floors])[floor] = true,
+            RequestType::Hall(Direction::Up) => self.hall_requests[floor].up = RequestStatus::Pending,
+            RequestType::Hall(Direction::Down) => self.hall_requests[floor].down = RequestStatus::Pending,
+            RequestType::Cab => self.cab_requests.entry(name).or_insert(vec![RequestStatus::Inactive; self.num_floors])[floor] = RequestStatus::Pending,
         }
     }
 
-    pub fn clear_request(&mut self, floor: usize, name: String, request_type: RequestType) {
+    pub fn set_inactive(&mut self, floor: usize, name: String, request_type: RequestType) {
         match request_type {
-            RequestType::Hall(Direction::Up) => self.hall_requests[floor].up = HallRequestState::Inactive,
-            RequestType::Hall(Direction::Down) => self.hall_requests[floor].down = HallRequestState::Inactive,
-            RequestType::Cab => self.cab_requests.entry(name).or_insert(vec![false; self.num_floors])[floor] = false,
+            RequestType::Hall(Direction::Up) => self.hall_requests[floor].up = RequestStatus::Inactive,
+            RequestType::Hall(Direction::Down) => self.hall_requests[floor].down = RequestStatus::Inactive,
+            RequestType::Cab => self.cab_requests.entry(name).or_insert(vec![RequestStatus::Inactive; self.num_floors])[floor] = RequestStatus::Inactive,
         }
     }
-    // Velger beste heis for en bestilling
-    pub fn assign_requests(&mut self, elevator_views: &HashMap<String, ElevatorView>) {
-        let hall_requests = self
-            .hall_requests
-            .iter()
-            .map(|request| {
-                (
-                    request.up != HallRequestState::Inactive,
-                    request.down != HallRequestState::Inactive,
-                )
-            })
-            .collect();
 
-        let states = elevator_views
-            .iter()
-            .filter(|(_, v)| v.active)
-            .map(|(k, v)| (k.to_owned(), create_hra_state(v, self.cab_requests.get(k).unwrap_or(&vec![false; self.num_floors]))))
-            .collect();
-
-        let assignments = match run_hall_request_assigner(hall_requests, states) {
-            Ok(assignments) => assignments,
-            Err(message) => {
-                error!("Could not assign requests: {message}");
-                return;
+    pub fn actiave_all_confirmed(&mut self) {
+        for cab_requests in self.cab_requests.values_mut() {
+            for cab_request in cab_requests {
+                if *cab_request == RequestStatus::Pending {
+                    *cab_request = RequestStatus::Active;
+                }
             }
-        };
+        }
 
-        for (name, assigned_hall_requests) in assignments.iter() {
-            for (floor, (up, down, _)) in assigned_hall_requests.iter().enumerate() {
-                if *up {
-                    self.hall_requests[floor].up = HallRequestState::Assigned(name.to_string());
-                }
+        for hall_request in &mut self.hall_requests {
+            if hall_request.up == RequestStatus::Pending {
+                hall_request.up = RequestStatus::Active;
+            }
 
-                if *down {
-                    self.hall_requests[floor].down = HallRequestState::Assigned(name.to_string());
-                }
+            if hall_request.down == RequestStatus::Pending {
+                hall_request.down = RequestStatus::Active;
             }
         }
     }
-    pub fn requests_for_elevator(&self, name: &String) -> Option<Requests> {
-        let mut requests = Requests::new(self.num_floors);
 
-        if let Some(cab_requests) = self.cab_requests.get(name) {
-            for (floor, cab_request) in cab_requests.iter().enumerate() {
-                if *cab_request {
-                    requests.add(floor, RequestType::Cab);
-                }
-            }
-        }
+    pub fn hall_requests_as_bools(&self) -> Vec<(bool, bool)> {
+        self.hall_requests.iter().map(|request| (request.up == RequestStatus::Active, request.down == RequestStatus::Active)).collect()
+    }
 
-        for (floor, hall_request) in self.hall_requests.iter().enumerate() {
-            if hall_request.up == HallRequestState::Assigned(name.clone()) {
-                requests.add(floor, RequestType::Hall(Direction::Up));
-            }
-
-            if hall_request.down == HallRequestState::Assigned(name.clone()) {
-                requests.add(floor, RequestType::Hall(Direction::Down));
-            }
-        }
-
-        return Some(requests);
+    pub fn cab_requests_as_bools(&self, name: &String) -> Vec<bool> {
+        self.cab_requests.get(name)
+            .map_or(vec![false; self.hall_requests.len()], |requessts| requessts.iter().map(|request| *request == RequestStatus::Active).collect())
     }
 }

@@ -1,6 +1,6 @@
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap, time::{Duration, SystemTime}
@@ -10,9 +10,9 @@ use crate::{elevator::{
     controller::{ElevatorCommand, ElevatorEvent, ElevatorState},
     inputs::create_call_button_channel,
     lights::{set_cab_lights, set_hall_lights}, requests::{Direction, RequestType},
-}, worldview::ElevatorView};
+}, hall_request_assigner::{assign_requests, RequestAssignments}, worldview::ElevatorView};
 use crate::network::Node;
-use crate::worldview::Worldview;
+use crate::worldview::RequestStates;
 use crate::backup::save_state_to_file;
 
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
@@ -22,18 +22,19 @@ pub enum DispatcherMessage {
     ElevatorState(String, ElevatorState),
     ClearRequest(String, usize, RequestType),
     NewRequest(String, usize, RequestType),
-    Synchronize(String, Worldview),
+    Synchronize(String, RequestStates),
 }
 
 pub fn run_dispatcher(
     name: String,
     node: Node<DispatcherMessage>,
-    inital_worldview: Worldview,
+    inital_worldview: RequestStates,
     elevio_driver: &Elevator,
     elevator_command_tx: Sender<ElevatorCommand>,
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
     let mut request_views = inital_worldview.clone();
+    let mut request_assignments = RequestAssignments::new(inital_worldview.hall_requests.len());
     let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
 
     let deactivation_ticker = tick(Duration::from_millis(1000));
@@ -54,32 +55,17 @@ pub fn run_dispatcher(
                         continue;
                     },
                 }
-
+ 
+                set_cab_lights(&elevio_driver, &request_views.cab_requests_as_bools(&name));
+                set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
+               
                 // Sync with the master and send new requests to the elevator controller
-                let Some(requests) = request_views.requests_for_elevator(&name) else {
-                    continue;
-                };
-
-                set_cab_lights(&elevio_driver, &requests);
-                set_hall_lights(&elevio_driver, &request_views.hall_requests);
-
-                for (floor, ((&up, &down), &cab)) in requests.iter().enumerate() {
-                    if up {
-                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
+                for (active, floor, request_type) in request_assignments.requests_for_elevator(&name) {
+                    if active {
+                        error!("{floor} {request_type:?}");
+                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, request_type)).unwrap();
                     } else {
-                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Up))).unwrap();
-                    }
-
-                    if down {
-                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
-                    } else {
-                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Hall(Direction::Down))).unwrap();
-                    }
-
-                    if cab {
-                        elevator_command_tx.send(ElevatorCommand::AddRequest(floor, RequestType::Cab)).unwrap();
-                    } else {
-                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, RequestType::Cab)).unwrap();
+                        elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, request_type)).unwrap();
                     }
                 }
 
@@ -111,15 +97,20 @@ pub fn run_dispatcher(
                         });
                     },
                     DispatcherMessage::NewRequest(name, floor, request_type) => {
-                        request_views.add_request(floor, name, request_type);
+                        request_views.set_pending(floor, name, request_type);
                     },
                     DispatcherMessage::ClearRequest(name, floor, request_type) => {
-                        request_views.clear_request(floor, name, request_type);
+                        request_views.set_inactive(floor, name, request_type);
                     },
                     _ => {},
                 }
 
-                request_views.assign_requests(&elevator_views);
+                request_views.actiave_all_confirmed();
+
+                match assign_requests(&request_views, &elevator_views) {
+                    Some(new_request_assignment) => request_assignments = new_request_assignment,
+                    None => error!("Could not assign requests."),
+                }
 
                 // if slave_worldview.iteration != master_worldview.iteration {
                 //     warn!("Received invalid worldview. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
@@ -140,9 +131,7 @@ pub fn run_dispatcher(
                         continue;
                     };
 
-                    let has_orders = request_views.requests_for_elevator(name).map_or(false, |requests| requests.any_exists());
-
-                    if elevator.active && has_orders && duration > ELEVATOR_TIMEOUT {
+                    if request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
                         info!("Deactivating {name}. :(");
                         elevator.active = false;
                         changed = true;
@@ -150,8 +139,8 @@ pub fn run_dispatcher(
                 }
 
                 if changed {
-                    request_views.assign_requests(&elevator_views);
-                    request_views.iteration += 1;
+                    // request_views.assign_requests(&elevator_views);
+                    // request_views.iteration += 1;
 
                     //Inform all slaves about new orders
                     node.to_slaves_channel().send(DispatcherMessage::Synchronize(name.clone(), request_views.clone())).unwrap();

@@ -47,7 +47,7 @@ fn main() {
 
     // Load state from backup if available
     let inital_worldview = if args.no_backup {
-        worldview::Worldview::new(args.num_floors)
+        worldview::RequestStates::new(args.num_floors)
     } else {
         match backup::load_state_from_file("backup.json") {
             Ok(worldview) => {
@@ -56,7 +56,7 @@ fn main() {
             }
             Err(_) => {
                 info!("No backup found.");
-                worldview::Worldview::new(args.num_floors)
+                worldview::RequestStates::new(args.num_floors)
             }
         }
     };

@@ -1,5 +1,8 @@
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
+
+use crate::{elevator::{controller::Behaviour, requests::{self, Direction, RequestType}}, worldview::{ElevatorView, RequestStates, RequestStatus}};
 
 #[derive(Serialize, Deserialize)]
 pub enum HraBehaviour {
@@ -69,4 +72,119 @@ pub fn run_hall_request_assigner(
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
+}
+
+fn create_hra_state(elevator_view: &ElevatorView, cab_requests: &Vec<bool>) -> HraState {
+    HraState {
+        behaviour: match elevator_view.state.behaviour {
+            Behaviour::DoorOpen => HraBehaviour::DoorOpen,
+            Behaviour::Moving => HraBehaviour::Moving,
+            _ => HraBehaviour::Idle,
+        },
+        floor: elevator_view.state.floor,
+        direction: match elevator_view.state.direction {
+            Some(Direction::Down) => HraDirection::Down,
+            None => HraDirection::Stop,
+            Some(Direction::Up) => HraDirection::Up,
+        },
+        cab_requests: cab_requests.clone(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestAssignments {
+    pub hall_up: Vec<Option<String>>,
+    pub hall_down: Vec<Option<String>>,
+    pub cab: HashMap<String, Vec<bool>>,
+}
+
+fn assignees_to_requests(name: &String, assignees: &Vec<Option<String>>, request_type: RequestType) -> Vec<(bool, usize, RequestType)> {
+    assignees.iter().enumerate().map(|(floor, assignee)| (assignee.as_ref() == Some(name), floor, request_type)).collect()
+}
+
+impl RequestAssignments {
+    pub fn new(num_floors: usize) -> Self {
+        Self {
+            hall_up: vec![None; num_floors],
+            hall_down: vec![None; num_floors],
+            cab: HashMap::new(),
+        }
+    }
+
+    pub fn requests_for_elevator(&self, name: &String) -> Vec<(bool, usize, RequestType)> {
+        let hall_up = assignees_to_requests(name, &self.hall_up, RequestType::Hall(Direction::Up));
+        let hall_down = assignees_to_requests(name, &self.hall_down, RequestType::Hall(Direction::Down));
+
+        let requests = hall_up.into_iter().chain(hall_down);
+
+        if let Some(cab) = self.cab.get(name) {
+            requests.chain(cab.iter().enumerate().map(|(floor, &active)| (active, floor, RequestType::Cab))).collect()
+        } else {
+            requests.collect()
+        }
+    }
+
+    pub fn has_assignment(&self, name: &String) -> bool {
+        let assignee = Some(name.clone());
+
+        self.cab.get(name).map_or(false, |cab_requests| cab_requests.contains(&true))
+        || self.hall_up.contains(&assignee)
+        || self.hall_down.contains(&assignee)
+    }
+}
+
+pub fn assign_requests(request_states: &RequestStates, elevator_views: &HashMap<String, ElevatorView>) -> Option<RequestAssignments> {
+    let num_floors = request_states.hall_requests.len();
+
+    let hall_requests: Vec<(bool, bool)> = request_states
+        .hall_requests
+        .iter()
+        .map(|request| {
+            (
+                request.up == RequestStatus::Active,
+                request.down == RequestStatus::Active,
+            )
+        })
+        .collect();
+
+    let cab_requests: HashMap<String, Vec<bool>> = request_states.cab_requests.iter().map(|(k, v)| (k.clone(), v.iter().map(|request| *request == RequestStatus::Active).collect())).collect();
+
+    let states = elevator_views
+        .iter()
+        .filter(|(_, v)| v.active)
+        .map(|(k, v)| (k.to_owned(), create_hra_state(v, &cab_requests.get(k).unwrap_or(&vec![false; num_floors]))))
+        .collect();
+
+    let assignments = match run_hall_request_assigner(hall_requests, states) {
+        Ok(assignments) => assignments,
+        Err(message) => {
+            error!("Could not assign requests: {message}");
+            return None;
+        }
+    };
+
+
+    let mut request_assignments = RequestAssignments::new(num_floors);
+
+    for (name, requests) in assignments {
+        let mut cab_requests = vec![false; num_floors];
+
+        for (floor, &(up, down, cab)) in requests.iter().enumerate() {
+            if up {
+                request_assignments.hall_up[floor] = Some(name.clone());
+            }
+
+            if down {
+                request_assignments.hall_down[floor] = Some(name.clone());
+            }
+
+            if cab {
+                cab_requests[floor] = true;
+            }
+        }
+
+        request_assignments.cab.insert(name, cab_requests);
+    }
+
+    Some(request_assignments)
 }

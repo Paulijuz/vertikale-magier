@@ -1,15 +1,15 @@
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, iter::zip, path::Display, process::Command};
+use std::{collections::HashMap, iter::zip, process::Command};
 
 use crate::{
     elevator::{
         controller::Behaviour,
         requests::{Direction, RequestType},
-    }, network, worldview::{ElevatorView, RequestStates, RequestStatus}
+    }, worldview::{ElevatorView, RequestStates, RequestStatus}
 };
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum HraBehaviour {
     #[serde(rename = "idle")]
     Idle,
@@ -19,7 +19,7 @@ pub enum HraBehaviour {
     DoorOpen,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum HraDirection {
     #[serde(rename = "up")]
     Up,
@@ -29,7 +29,7 @@ pub enum HraDirection {
     Stop,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct HraState {
     pub behaviour: HraBehaviour,
     pub floor: usize,
@@ -38,7 +38,7 @@ pub struct HraState {
     pub cab_requests: Vec<bool>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct HraInput {
     #[serde(rename = "hallRequests")]
     pub hall_requests: Vec<(bool, bool)>,

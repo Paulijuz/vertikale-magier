@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, time::SystemTime};
+use std::{collections::HashMap, fmt, iter::zip, time::SystemTime};
 
-use crate::elevator::{
+use crate::{elevator::{
     controller::ElevatorState,
     requests::{Direction, RequestType},
-};
+}, hall_request_assigner::RequestAssignments};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ElevatorView {
@@ -76,7 +76,7 @@ pub struct RequestStates {
     num_floors: usize,
 }
 
-pub fn requests_with_assignments_to_string(request_states: &RequestStates, elevator_views: &HashMap<String, ElevatorView>) -> String {
+pub fn system_state_to_string(request_states: &RequestStates, request_assignments: &RequestAssignments, elevator_views: &HashMap<String, ElevatorView>) -> String {
     let mut output = String::new();
 
     output += &format!("Elevators:\n");
@@ -90,6 +90,11 @@ pub fn requests_with_assignments_to_string(request_states: &RequestStates, eleva
         for line in elevator_state.to_string().lines() {
             output += &format!("  {line}\n");
         }
+    }
+
+    output += &format!("Assignmeents: \n");
+    for (up, down) in zip(&request_assignments.hall_up, &request_assignments.hall_down) {
+        output += &format!("{:?} | {:?}\n", up, down);
     }
 
     output += &format!("Requests:\n");

@@ -7,7 +7,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::{backup::save_state_to_file, worldview::requests_with_assignments_to_string};
+use crate::{backup::save_state_to_file, worldview::system_state_to_string};
 use crate::network::Node;
 use crate::worldview::RequestStates;
 use crate::{
@@ -24,17 +24,17 @@ use crate::{
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DispatcherMessage {
+pub enum Message {
     ElevatorState(String, ElevatorState),
     ClearRequest(String, usize, RequestType),
     NewRequest(String, usize, RequestType),
-    RequestStates(String, RequestStates),
-    RequestAssignments(String, RequestAssignments),
+    RequestStates(RequestStates),
+    RequestAssignments(RequestAssignments),
 }
 
 pub fn run_dispatcher(
     name: String,
-    node: Node<DispatcherMessage>,
+    node: Node<Message>,
     inital_worldview: RequestStates,
     elevio_driver: &Elevator,
     elevator_command_tx: Sender<ElevatorCommand>,
@@ -54,15 +54,15 @@ pub fn run_dispatcher(
                 let message = message.unwrap();
 
                 match message {
-                    DispatcherMessage::RequestStates(name, new_request_views) => {
+                    Message::RequestStates(new_request_views) => {
                         // info!("Received state from master \"{}\":\n{}", name, new_request_views);
                         request_views = new_request_views;
 
                         set_cab_lights(&elevio_driver, &request_views.cab_requests_as_bools(&name));
                         set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
                     },
-                    DispatcherMessage::RequestAssignments(name, new_request_assignments) => {
-                        // info!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
+                    Message::RequestAssignments(new_request_assignments) => {
+                        error!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
 
                         for (active, floor, request_type) in slave_request_assignments.different_requests(&new_request_assignments, &name) {
                             if active {
@@ -82,7 +82,7 @@ pub fn run_dispatcher(
                     },
                 }
 
-                info!("{}\n", requests_with_assignments_to_string(&request_views, &elevator_views));
+                info!("{}\n", system_state_to_string(&request_views, &slave_request_assignments, &elevator_views));
             },
             recv(node.from_slave_channel()) -> message => {
                 let message = message.unwrap();
@@ -90,7 +90,7 @@ pub fn run_dispatcher(
                 info!("Received message from slave: {message:?}");
 
                 match message {
-                    DispatcherMessage::ElevatorState(name, state) => {
+                    Message::ElevatorState(name, state) => {
                         // If we have received a message from a deactivated slave, we can
                         // assume that it is alive and activate it again
                         if let Some(elevator) = elevator_views.get_mut(&name) {
@@ -107,10 +107,10 @@ pub fn run_dispatcher(
                             timestamp_last_event: SystemTime::now(),
                         });
                     },
-                    DispatcherMessage::NewRequest(name, floor, request_type) => {
+                    Message::NewRequest(name, floor, request_type) => {
                         request_views.set_pending(floor, name, request_type);
                     },
-                    DispatcherMessage::ClearRequest(name, floor, request_type) => {
+                    Message::ClearRequest(name, floor, request_type) => {
                         request_views.set_inactive(floor, name, request_type);
                     },
                     _ => {},
@@ -128,8 +128,8 @@ pub fn run_dispatcher(
                     None => error!("Could not assign requests."),
                 }
 
-                node.to_slaves_channel().send(DispatcherMessage::RequestStates(name.clone(), request_views.clone())).unwrap();
-                node.to_slaves_channel().send(DispatcherMessage::RequestAssignments(name.clone(), master_request_assignments.clone())).unwrap();
+                node.to_slaves_channel().send(Message::RequestStates(request_views.clone())).unwrap();
+                node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
             },
             //Start to inform slaves that master exists
             recv(deactivation_ticker) -> _ => {
@@ -166,10 +166,10 @@ pub fn run_dispatcher(
 
                 let message = match elevator_event {
                     ElevatorEvent::RequestCleared(floor, request_type) => {
-                        DispatcherMessage::ClearRequest(name.clone(), floor, request_type)
+                        Message::ClearRequest(name.clone(), floor, request_type)
                     },
                     ElevatorEvent::StateUpdated(state) => {
-                        DispatcherMessage::ElevatorState(name.clone(), state)
+                        Message::ElevatorState(name.clone(), state)
                     },
                 };
 
@@ -190,7 +190,7 @@ pub fn run_dispatcher(
                     },
                 };
 
-                node.to_master_channel().send(DispatcherMessage::NewRequest(name.clone(), floor, request_type)).unwrap();
+                node.to_master_channel().send(Message::NewRequest(name.clone(), floor, request_type)).unwrap();
             },
         }
 

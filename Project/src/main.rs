@@ -66,7 +66,7 @@ fn main() {
 
     let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
 
-    let node = network::Node::<request_dispatch::DispatcherMessage>::new(name.clone());
+    let node = network::Node::<request_dispatch::Message>::new(name.clone());
 
     let (elevator_command_tx, elevator_command_rx) = cbc::unbounded();
     let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();

@@ -21,6 +21,7 @@ use crate::{
     worldview::ElevatorView,
 };
 
+const REQUEST_BROADCAST_INTERCA: Duration = Duration::from_millis(50);
 const DEACTIVATION_POLL: Duration = Duration::from_millis(100);
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 
@@ -50,6 +51,7 @@ pub fn run_dispatcher(
     let mut newest_elevator_state: Option<ElevatorState> = None;
     let mut role: Role = Role::Master(HashSet::new());
 
+    let request_broadcast_ticker = tick();
     let request_timeout_ticker = tick(DEACTIVATION_POLL);
     let call_button_channel = create_call_button_channel(elevio_driver);
 
@@ -131,8 +133,13 @@ pub fn run_dispatcher(
                         }
                     },
                     Message::ClearRequests(name, requests) => {
+                        // If we recieve a clear floor from an elevator we can be sure it's alive.
+                        if let Some(elevator) = elevator_views.get_mut(&name) {
+                            elevator.timestamp_last_event = SystemTime::now();
+                        }
+                        
                         let mut changed = false;
-
+                        
                         for (floor, request_type, iteration) in requests {
                             changed |= master_request_views.set_inactive(floor, name.clone(), request_type, iteration);
                         }
@@ -140,13 +147,7 @@ pub fn run_dispatcher(
                         if !changed {
                             warn!("Failed to clear requests.");
                             continue;
-                        }
-
-                        // If we recieve a clear floor from an elevator we can be sure it's alive.
-                        if let Some(elevator) = elevator_views.get_mut(&name) {
-                            elevator.timestamp_last_event = SystemTime::now();
-                        }
-
+                        }                        
                     },
                     Message::Acks(name, requests) => {
                         let mut changed = false;
@@ -193,6 +194,10 @@ pub fn run_dispatcher(
                         },
                     }
                 }
+            },
+            recv(request_broadcast_ticker) -> _ => {
+                let new_requests = master_request_views.set_all_acked_active(&connected_nodes);
+                node.to_slaves_channel().send(Message::RequestStates(master_request_views.clone())).unwrap();
             },
             //Start to inform slaves that master exists
             recv(request_timeout_ticker) -> _ => {

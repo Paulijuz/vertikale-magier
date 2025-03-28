@@ -19,6 +19,8 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
 pub trait Transmit: Serialize + de::DeserializeOwned + Clone + Send + 'static {}
 impl<T: Serialize + de::DeserializeOwned + Clone + Send + 'static> Transmit for T {}
 
+/// The building block of our network module. 
+/// It be both used for TCP and UDP.
 pub struct Client<T: Transmit> {
     socket: Socket,
     send_channel: Option<Sender<T>>,
@@ -67,6 +69,10 @@ fn receive<T: Transmit>(mut socket: Socket, receive_channel_tx: Sender<(SocketAd
             break;
         }
 
+        // On some machines, when multiple clients are connected to each other, sometimes
+        // the receiver ip address is not available. Simply giving a random port in that case
+        // with an invalid ip is good enough in our case as we simple use the ip as unique 
+        // identifiers.
         let address = address
             .as_socket_ipv4()
             .unwrap_or(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));

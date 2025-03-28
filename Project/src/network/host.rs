@@ -17,6 +17,9 @@ const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Reserved address used to send messages to all connected clients
 pub const ALL_CLIENTS: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
 
+/// Host is a TCP server that build on of `client``. It starts two threads
+/// for accepting and serving incoming conneciton. It uses `client``
+/// struct for handling the connections themselves.
 pub struct Host<T: Transmit> {
     socket: Socket,
     send_channel: Option<Sender<(SocketAddrV4, T)>>,

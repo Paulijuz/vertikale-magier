@@ -1,204 +1,280 @@
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use driver_rust::elevio::elev::{Elevator, CAB, HALL_DOWN, HALL_UP};
-use log::{debug, error, info, warn};
+use log::{error, info, warn, debug};
+use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     time::{Duration, SystemTime},
 };
 
-use crate::backup::save_state_to_file;
-use crate::elevator::{
-    controller::{Direction, ElevatorEvent},
-    inputs::create_call_button_channel,
-    lights::{set_cab_lights, set_hall_lights},
+use crate::{network::{Node, Role}, worldview::num_active_elevators};
+use crate::worldview::RequestStates;
+use crate::{backup::save_state_to_file, worldview::system_state_to_string};
+use crate::{
+    elevator::{
+        controller::{ElevatorCommand, ElevatorEvent, ElevatorState},
+        inputs::create_call_button_channel,
+        lights::{set_cab_lights, set_hall_lights},
+        requests::{Direction, RequestType},
+    },
+    hall_request_assigner::{assign_requests, RequestAssignments},
+    worldview::ElevatorView,
 };
-use crate::network::Node;
-use crate::requests::requests::Requests;
-use crate::worldview::{HallRequestState, Worldview};
 
-const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
+const DEACTIVATION_POLL: Duration = Duration::from_millis(100);
+const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(4000);
+const ELEVATOR_TIMEIN: Duration = Duration::from_millis(14000);
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Message {
+    ElevatorState(String, ElevatorState),
+    ClearRequests(String, Vec<(usize, RequestType, u32)>),
+    NewRequest(String, usize, RequestType),
+    RequestStates(RequestStates),
+    Acks(String, Vec<(String, usize, RequestType, u32)>),
+    RequestAssignments(RequestAssignments),
+}
+
+/// The dispatcher is the brains of the project.
+/// It assigns and distributes order according to the 
+/// button presses and elevator states it receives.
+/// 
+/// Under normal cirmucstances, one of the dispatcher will be the mater
+/// and the others slaves (altough the master loopbacks all messages to slaves
+/// back to iself so in a way it's both a slave and a master).
 pub fn run_dispatcher(
-    node: Node<Worldview>,
-    inital_worldview: Worldview,
+    name: String,
+    node: Node<Message>,
+    inital_worldview: RequestStates,
     elevio_driver: &Elevator,
-    elevator_command_tx: Sender<Requests>,
+    elevator_command_tx: Sender<ElevatorCommand>,
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
-    let mut global_worldview = inital_worldview.clone();
-    let mut local_worldview = inital_worldview;
-    let deactivation_ticker = tick(Duration::from_millis(1000));
+    let mut slave_request_states = inital_worldview.clone();
+    let mut master_request_states = inital_worldview;
+    let mut slave_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
+    let mut master_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
+    let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
+    let mut newest_elevator_state: Option<ElevatorState> = None;
+    let mut role: Role = Role::Master(HashSet::new());
+
+    let request_timeout_ticker = tick(DEACTIVATION_POLL);
     let call_button_channel = create_call_button_channel(elevio_driver);
+
+    set_cab_lights(&elevio_driver, &slave_request_states.cab_requests_as_bools(&name));
+    set_hall_lights(&elevio_driver, &slave_request_states.hall_requests_as_bools());
 
     loop {
         select! {
             recv(node.from_master_channel()) -> message => {
-                global_worldview = message.unwrap();
+                let message = message.unwrap();
 
-                info!("Received state from master \"{}\":\n{}", global_worldview.name, global_worldview);
+                match message {
+                    Message::RequestStates(new_request_views) => {
+                        slave_request_states = new_request_views;
 
-                // Sync with the master and send new requests to the elevator controller
-                local_worldview.sync_with_master(global_worldview.clone());
-                let requests = local_worldview.requests_for_local_elevator();
+                        let not_acked = slave_request_states.not_acked(&name);
 
-                set_cab_lights(&elevio_driver, &requests);
-                set_hall_lights(&elevio_driver, &local_worldview.hall_requests);
+                        if not_acked.len() > 0 {
+                            node.to_master_channel().send(Message::Acks(name.clone(), not_acked)).unwrap();
+                        }
 
-                elevator_command_tx.send(requests).unwrap();
+                        set_cab_lights(&elevio_driver, &slave_request_states.cab_requests_as_bools(&name));
+                        set_hall_lights(&elevio_driver, &slave_request_states.hall_requests_as_bools());
+                    },
+                    Message::RequestAssignments(new_request_assignments) => {
+                        slave_request_assignments = new_request_assignments;
 
-                if local_worldview.name != global_worldview.name && local_worldview.hall_requests.iter().any(|r| r.up == HallRequestState::Requested || r.down == HallRequestState::Requested) {
-                    node.to_master_channel().send(local_worldview.clone()).unwrap();
+                        for (active, floor, request_type) in slave_request_assignments.requests(&name) {
+                            if active {
+                                elevator_command_tx.send(ElevatorCommand::AddRequest(floor, request_type)).unwrap();
+                            } else {
+                                elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, request_type)).unwrap();
+                            }
+                        }
+                    },
+                    invalid_message => {
+                        warn!("Received invalid message from master: {invalid_message:?}");
+                        continue;
+                    },
                 }
+
+                master_request_states = slave_request_states.clone();
+                master_request_assignments = slave_request_assignments.clone();
+
+                info!("{}\n", system_state_to_string(&slave_request_states, &slave_request_assignments, &elevator_views));
             },
             recv(node.from_slave_channel()) -> message => {
-                let mut slave_worldview = message.unwrap();
-                let mut slave_elevator_state = slave_worldview.local_elevator_state().clone();
-                let slave_name = &slave_worldview.name;
+                let message = message.unwrap();
 
-                info!("Master received message from \"{slave_name}\":\n{slave_worldview}");
-
-                let mut master_worldview = global_worldview.clone();
-                master_worldview.name = local_worldview.name.clone();
-
-                // If we have received a message from a deactivated slave, we can
-                // assume that it is alive and activate it again
-                if let Some(elevator) = master_worldview.elevators.get_mut(slave_name) {
-                    if !elevator.active {
-                        info!("Aktiverer \"{}\" :)", slave_name);
-                        elevator.active = true;
-                    }
-                } else {
-                    info!("New slave connected \"{}\"", slave_name);
-                }
-
-                slave_elevator_state.timestamp_last_event = SystemTime::now();
-                master_worldview.elevators.insert(slave_name.clone(), slave_elevator_state);
-
-                if slave_worldview.iteration != master_worldview.iteration {
-                    warn!("Received invalid worldview. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
-                    node.to_slaves_channel().send(global_worldview.clone()).unwrap();
+                let Role::Master(connected_nodes) = &role else {
+                    warn!("Received message from slave while being a master: {message:?}");
                     continue;
+                };
+
+                info!("Received message from slave: {message:?}");
+
+                let mut requests_changed = false;
+
+                match message {
+                    Message::ElevatorState(name, state) => {
+                        // If we have received a message from a deactivated slave, we can
+                        // assume that it is alive and activate it again
+                        if let Some(elevator) = elevator_views.get_mut(&name) {
+                            elevator.state = state;
+                            elevator.timestamp_last_event = SystemTime::now();
+                        } else {
+                            info!("New slave \"{}\" connected.", name);
+                            elevator_views.insert(name, ElevatorView {
+                                active: false,
+                                state,
+                                timestamp_last_event: SystemTime::now(),
+                            });
+                        }
+                    },
+                    Message::NewRequest(name, floor, request_type) => {
+                        if !master_request_states.set_pending(floor, name, request_type) {
+                            warn!("Failed to set request to pending.");
+                            continue;
+                        }
+                    },
+                    Message::ClearRequests(name, requests) => {
+                        // If we recieve a clear floor from an elevator we can be sure it's alive.
+                        if let Some(elevator) = elevator_views.get_mut(&name) {
+                            elevator.timestamp_last_event = SystemTime::now();
+                        }
+                        
+                        let mut changed = false;
+
+                        for (floor, request_type, iteration) in requests {
+                            changed |= master_request_states.set_inactive(floor, name.clone(), request_type, iteration);
+                        }
+
+                        if !changed {
+                            warn!("Failed to clear requests.");
+                            continue;
+                        }
+
+                        requests_changed = true;
+                    },
+                    Message::Acks(name, requests) => {
+                        let mut changed = false;
+
+                        for (request_name, floor, request_type, iteration_check) in requests{
+                            changed |= master_request_states.add_ack(floor, request_name, request_type, name.clone(), iteration_check);
+                        }
+
+                        if !changed {
+                            warn!("Failed to acknowledge.");
+                            continue;
+                        }
+                    }
+                    _ => {},
                 }
 
-                // Take new and delete completed orders
-                for (floor, received_request) in slave_worldview.hall_requests.iter().enumerate() {
-                    let master_request = master_worldview.hall_requests[floor].clone();
+                requests_changed |= master_request_states.set_all_acked_active(&connected_nodes);
+                node.to_slaves_channel().send(Message::RequestStates(master_request_states.clone())).unwrap();
 
-                    match (&received_request.up, &master_request.up) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_worldview.add_request(floor, Direction::Up),
-                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_worldview.clear_request(floor, Direction::Up),
+                if requests_changed {
+                    match assign_requests(&master_request_states, &elevator_views) {
+                        Some(new_request_assignment) if master_request_assignments != new_request_assignment => {
+                            master_request_assignments = new_request_assignment;
+                            node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
+                        }
+                        None => error!("Could not assign requests."),
                         _ => {},
                     }
+                }
 
-                    match (&received_request.down, &master_request.down) {
-                        (HallRequestState::Requested, HallRequestState::Inactive) => master_worldview.add_request(floor, Direction::Down),
-                        (HallRequestState::Inactive, HallRequestState::Assigned(_)) => master_worldview.clear_request(floor, Direction::Down),
-                        _ => {},
+            },
+            recv(node.connection_update_channel()) -> connection_update => {
+                let new_role = connection_update.unwrap();
+
+                if role != new_role {
+                    role = new_role;
+
+                    match &role {
+                        Role::Master(connected_nodes) => {
+                            info!("Connected nodes: {connected_nodes:?}");
+                        },
+                        Role::Slave => if let Some(elevator_state) = newest_elevator_state {
+                            node.to_master_channel().send(Message::ElevatorState(name.clone(), elevator_state)).unwrap();
+                        },
                     }
-                }
-
-                // If the slave is also the master, only add requests, Don't assign them until we hear from another slave
-                // about the requests. That way we guaranteee that at least two nodes know about the states.
-                if master_worldview.name != slave_worldview.name {
-                    master_worldview.assign_requests();
-                }
-
-                master_worldview.iteration += 1;
-
-                // Send the worldview to all slaves. Slaves will repeat the message back to us as a form of ack.
-                node.to_slaves_channel().send(master_worldview.clone()).unwrap();
-
-                // Only update the global worldview if the slave which we received the update from is not also the master.
-                // This is requried because at least two nodes need to know about a worldview to guarantee that nothing is lost.
-                if master_worldview.name != slave_worldview.name {
-                    global_worldview = master_worldview
                 }
             },
             //Start to inform slaves that master exists
-            recv(deactivation_ticker) -> _ => {
+            recv(request_timeout_ticker) -> _ => {
+                if role == Role::Slave {
+                    continue;
+                }
+
                 //Received current timestamp
-                let timestamp_start_master_server = SystemTime::now();
+                let now = SystemTime::now();
                 let mut changed = false;
+                
+                let num_active = num_active_elevators(&elevator_views);
 
-                let elevator_requests: HashMap<_, _> = global_worldview
-                    .elevators
-                    .keys()
-                    .map(|name| (name.clone(), global_worldview.requests_for_elevator(name)))
-                    .collect();
+                for (name, elevator) in &mut elevator_views {
+                    let Ok(duration) = now.duration_since(elevator.timestamp_last_event) else {
+                        continue;
+                    };
 
-                //Go through all elevators and get the timestamp for assigned requests.
-                for (name, elevator) in &mut global_worldview.elevators {
-                    if let Ok(duration) = timestamp_start_master_server.duration_since(elevator.timestamp_last_event) {
-                        let has_orders = elevator_requests[name].as_ref().unwrap().any_exists();
-
-                        if elevator.active && has_orders && duration > ELEVATOR_TIMEOUT {
-                            info!("Deactivating {name} :(");
-                            elevator.active = false;
-                            changed = true;
-                        }
+                    if elevator.active && master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT && num_active > 1 {
+                        info!("Deactivating {name}. :(");
+                        elevator.active = false;
+                        changed = true;
+                    } else if !elevator.active && (duration < ELEVATOR_TIMEOUT || duration > ELEVATOR_TIMEIN) {
+                        info!("Activating {name}. :)");
+                        elevator.active = true;
+                        changed = true;
                     }
                 }
 
                 if changed {
-                    global_worldview.assign_requests();
+                    match assign_requests(&master_request_states, &elevator_views) {
+                        Some(new_request_assignment) => master_request_assignments = new_request_assignment,
+                        None => error!("Could not assign requests."),
+                    }
 
-                    global_worldview.iteration += 1;
-
-                    //Inform all slaves about new orders
-                    global_worldview.name = local_worldview.name.clone();
-                    node.to_slaves_channel().send(global_worldview.clone()).unwrap();
+                    node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
                 }
             },
             recv(elevator_event_rx) -> elevator_event => {
                 let elevator_event = elevator_event.unwrap();
 
-                let local_elevator = local_worldview.local_elevator_state();
-
-                match elevator_event {
-                    ElevatorEvent::FloorCleared((floor, direction)) => {
-                        local_elevator.cab_requests[floor] = false;
-
-                        if direction != Direction::Down {
-                            debug!("Cleared up.");
-                            local_worldview.hall_requests[floor].up = HallRequestState::Inactive;
-                        }
-                        if direction != Direction::Up {
-                            debug!("Cleared down.");
-                            local_worldview.hall_requests[floor].down = HallRequestState::Inactive;
-                        }
-
-                        //Send the updated order list to the elevator controller
-                        let requests = local_worldview.requests_for_local_elevator();
-                        elevator_command_tx.send(requests).unwrap();
+                let message = match elevator_event {
+                    ElevatorEvent::RequestsCleared(requests) => {
+                        Message::ClearRequests(name.clone(), requests.iter().map(|&(floor, request_type)| (floor, request_type, master_request_states.iteration(floor, &name, request_type))).collect())
                     },
                     ElevatorEvent::StateUpdated(state) => {
-                        local_elevator.state = state;
+                        newest_elevator_state = Some(state.clone());
+                        Message::ElevatorState(name.clone(), state)
                     },
-                }
+                };
 
                 //Inform the master about the new state
-                node.to_master_channel().send(local_worldview.clone()).unwrap();
+                node.to_master_channel().send(message).unwrap();
             },
             recv(call_button_channel) -> call_button => {
                 let call_button = call_button.unwrap();
-
                 let floor = call_button.floor as usize;
-                let hall_request = &mut local_worldview.hall_requests[floor];
 
-                //Add order at floor
-                match call_button.call {
-                    HALL_UP if hall_request.up == HallRequestState::Inactive => hall_request.up = HallRequestState::Requested,
-                    HALL_DOWN if hall_request.down == HallRequestState::Inactive => hall_request.down = HallRequestState::Requested,
-                    CAB => local_worldview.local_elevator_state().cab_requests[floor] = true,
-                    _ => {},
-                }
+                let request_type = match call_button.call {
+                    HALL_UP => RequestType::Hall(Direction::Up),
+                    HALL_DOWN => RequestType::Hall(Direction::Down),
+                    CAB => RequestType::Cab,
+                    unknown_call => {
+                        warn!("Received unkown call button: {unknown_call}");
+                        continue;
+                    },
+                };
 
-                //Inform the master about the new state
-                node.to_master_channel().send(local_worldview.clone()).unwrap();
+                node.to_master_channel().send(Message::NewRequest(name.clone(), floor, request_type)).unwrap();
             },
         }
 
-        if let Err(e) = save_state_to_file(&local_worldview, "backup.json") {
+        if let Err(e) = save_state_to_file(&master_request_states, "backup.json") {
             error!("Could not save backup file: {e}");
         }
     }

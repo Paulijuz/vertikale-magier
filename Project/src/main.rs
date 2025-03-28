@@ -7,9 +7,9 @@ use std::{process::exit, thread::spawn};
 
 mod backup;
 mod elevator;
+mod hall_request_assigner;
 mod network;
 mod request_dispatch;
-mod requests;
 mod timer;
 mod worldview;
 
@@ -27,6 +27,10 @@ struct Args {
     /// Number of floors the elevator has.
     #[arg(long, short = 'f', default_value_t = 4)]
     num_floors: usize,
+
+    /// Disables loading of `backup.json`.
+    #[arg(long, default_value_t = false)]
+    no_backup: bool,
 }
 
 fn main() {
@@ -41,19 +45,27 @@ fn main() {
             .unwrap();
 
     // Load state from backup if available
-    let inital_worldview = match backup::load_state_from_file("backup.json") {
-        Ok(worldview) => {
-            info!("Loaded backup.");
-            worldview
-        }
-        Err(_) => {
-            info!("No backup found.");
-            let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
-            worldview::Worldview::new(name, args.num_floors)
+    let inital_worldview = if args.no_backup {
+        worldview::RequestStates::new(args.num_floors)
+    } else {
+        match backup::load_state_from_file("backup.json") {
+            Ok(worldview) => {
+                info!("Loaded backup.");
+                worldview
+            }
+            Err(_) => {
+                info!("No backup found.");
+                worldview::RequestStates::new(args.num_floors)
+            }
         }
     };
 
-    let node = network::Node::<worldview::Worldview>::new(inital_worldview.name.clone());
+    elevator::lights::clear_all_lights(&elevio_driver);
+    let inital_floor = elevator::controller::initialize_elevator_position(&elevio_driver);
+
+    let name = args.name.unwrap_or(petname::petname(1, "").unwrap());
+
+    let node = network::Node::<request_dispatch::Message>::new(name.clone());
 
     let (elevator_command_tx, elevator_command_rx) = cbc::unbounded();
     let (elevator_event_tx, elevator_event_rx) = cbc::unbounded();
@@ -63,13 +75,17 @@ fn main() {
         spawn(move || {
             elevator::controller::controller_loop(
                 &elevio_driver,
+                inital_floor,
                 elevator_command_rx,
                 elevator_event_tx,
             )
         });
     }
 
+    info!("Starting as {}.", name);
+
     request_dispatch::run_dispatcher(
+        name,
         node,
         inital_worldview,
         &elevio_driver,

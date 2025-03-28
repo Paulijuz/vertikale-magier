@@ -3,15 +3,13 @@ use log::debug;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{
-    io::Result,
-    net::SocketAddrV4,
-    thread::{spawn, JoinHandle},
-    time::Duration,
+    collections::{HashMap, HashSet}, hash::Hash, io::Result, net::SocketAddrV4, thread::{spawn, JoinHandle}, time::{Duration, Instant}
 };
 
 use super::client::{Client, Transmit};
 
-const ADVERTISING_INTERVAL: Duration = Duration::from_millis(1000);
+const ADVERTISING_INTERVAL: Duration = Duration::from_millis(100);
+const ADVERTISMENT_LINGER: Duration = Duration::from_millis(5000);
 const ADVERTISER_ID_LENGTH: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,9 +25,11 @@ enum AdvertiserCommand<T> {
     Exit,
 }
 
-pub struct Advertiser<T: Transmit> {
+/// The advertiser is a simple utility which uses a UDP `client`
+/// to repeatedly send an "advertisment" for other advertiser to pick up.
+pub struct Advertiser<T: Transmit + PartialEq + Eq + Hash> {
     control_channel_tx: Sender<AdvertiserCommand<T>>,
-    receive_channel_rx: Receiver<(SocketAddrV4, T)>,
+    receive_channel_rx: Receiver<HashSet<(SocketAddrV4, T)>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -39,14 +39,15 @@ fn generate_sender_id() -> [u8; ADVERTISER_ID_LENGTH] {
     return buffer;
 }
 
-fn run_advertiser<T: Transmit>(
+fn run_advertiser<T: Transmit + PartialEq + Eq + Hash>(
     data: Option<T>,
     client: Client<Advertisment<T>>,
     control_channel_rx: Receiver<AdvertiserCommand<T>>,
-    receive_channel_tx: Sender<(SocketAddrV4, T)>,
+    receive_channel_tx: Sender<HashSet<(SocketAddrV4, T)>>,
 ) {
     let sender_id = generate_sender_id();
     let mut advertisment = data.map(|data| Advertisment { data, sender_id });
+    let mut received_advertisments: HashMap<[u8; ADVERTISER_ID_LENGTH], (SocketAddrV4, Instant, T)> = HashMap::new();
     let mut is_advertising = false;
 
     let ticker = tick(ADVERTISING_INTERVAL);
@@ -77,18 +78,26 @@ fn run_advertiser<T: Transmit>(
                     continue;
                 }
 
-                receive_channel_tx.send((address, received_advertisment.data)).unwrap();
+                received_advertisments.insert(received_advertisment.sender_id, (address, Instant::now(), received_advertisment.data));
+                received_advertisments.retain(|_, (_, instant_received, _)| instant_received.elapsed() < ADVERTISMENT_LINGER);
+
+                let received_advertisment_data: HashSet<(SocketAddrV4, T)> = received_advertisments
+                    .iter()
+                    .map(|(_, (addr, _, data))| (addr.clone(), data.clone()))
+                    .collect();
+
+                receive_channel_tx.send(received_advertisment_data).unwrap();
             },
         }
     }
 }
 
-impl<T: Transmit> Advertiser<T> {
+impl<T: Transmit + PartialEq + Eq + Hash> Advertiser<T> {
     pub fn new(advertisment: Option<T>, multicast_ip: [u8; 4], port: u16) -> Result<Self> {
         let client: Client<Advertisment<T>> = Client::new_udp_multicast_client(multicast_ip, port)?;
 
         let (control_channel_tx, control_channel_rx) = unbounded::<AdvertiserCommand<T>>();
-        let (receive_channel_tx, receive_channel_rx) = unbounded::<(SocketAddrV4, T)>();
+        let (receive_channel_tx, receive_channel_rx) = unbounded::<HashSet<(SocketAddrV4, T)>>();
 
         let thread = spawn(move || {
             run_advertiser(advertisment, client, control_channel_rx, receive_channel_tx)
@@ -119,12 +128,12 @@ impl<T: Transmit> Advertiser<T> {
             .unwrap();
     }
 
-    pub fn receive_channel(&self) -> &Receiver<(SocketAddrV4, T)> {
+    pub fn receive_channel(&self) -> &Receiver<HashSet<(SocketAddrV4, T)>> {
         &self.receive_channel_rx
     }
 }
 
-impl<T: Transmit> Drop for Advertiser<T> {
+impl<T: Transmit + PartialEq + Eq + Hash> Drop for Advertiser<T> {
     fn drop(&mut self) {
         debug!("Shutting down advertiser...");
         self.control_channel_tx

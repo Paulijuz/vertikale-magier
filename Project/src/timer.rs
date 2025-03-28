@@ -15,6 +15,7 @@ pub enum TimerCommand {
 }
 
 #[derive(Debug)]
+/// A simple timer utility which uses a background thread for time keeping.
 pub struct Timer {
     timeout_channel_rx: cbc::Receiver<()>,
     timer_command_channel_tx: cbc::Sender<TimerCommand>,
@@ -22,6 +23,8 @@ pub struct Timer {
 }
 
 impl Timer {
+    /// Creates a new timer struct and starts the background thread.
+    /// The duration cannot be changed later.
     pub fn new(duration: Duration) -> Timer {
         let (timeout_channel_tx, timeout_channel_rx) = cbc::unbounded::<()>();
         let (timer_command_channel_tx, timer_command_channel_rx) = cbc::unbounded::<TimerCommand>();

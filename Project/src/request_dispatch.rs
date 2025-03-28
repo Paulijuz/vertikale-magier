@@ -127,7 +127,6 @@ pub fn run_dispatcher(
                     Message::NewRequest(name, floor, request_type) => {
                         if !master_request_views.set_pending(floor, name, request_type) {
                             warn!("Failed to set request to pending.");
-                            continue;
                         }
                     },
                     Message::ClearRequests(name, requests) => {
@@ -139,7 +138,6 @@ pub fn run_dispatcher(
 
                         if !changed {
                             warn!("Failed to clear requests.");
-                            continue;
                         }
 
                         // If we recieve a clear floor from an elevator we can be sure it's alive.
@@ -157,7 +155,6 @@ pub fn run_dispatcher(
 
                         if !changed {
                             warn!("Failed to acknowledge.");
-                            continue;
                         }
                     }
                     _ => {},

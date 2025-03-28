@@ -211,7 +211,7 @@ pub fn run_dispatcher(
                         changed = true;
                     } else if !elevator.active && duration < ELEVATOR_TIMEOUT {
                         info!("Activating {name}. :)");
-                        elevator.active = false;
+                        elevator.active = true;
                         changed = true;
                     }
                 }

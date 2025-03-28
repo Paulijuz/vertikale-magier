@@ -27,10 +27,10 @@ const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(3500);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
     ElevatorState(String, ElevatorState),
-    ClearRequest(String, usize, RequestType),
+    ClearRequest(String, usize, RequestType, u32),
     NewRequest(String, usize, RequestType),
     RequestStates(RequestStates),
-    Acks(String, Vec<(String, usize, RequestType)>),
+    Acks(String, Vec<(String, usize, RequestType, u32)>),
     RequestAssignments(RequestAssignments),
 }
 
@@ -61,7 +61,7 @@ pub fn run_dispatcher(
 
                 match message {
                     Message::RequestStates(new_request_views) => {
-                        info!("Received state from master \"{}\":\n{:?}", name, new_request_views);
+                        // info!("Received state from master \"{}\":\n{:?}", name, new_request_views);
                         request_views = new_request_views;
 
                         let not_acked = request_views.not_acked(&name);
@@ -74,9 +74,9 @@ pub fn run_dispatcher(
                         set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
                     },
                     Message::RequestAssignments(new_request_assignments) => {
-                        info!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
+                        // info!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
 
-                        for (active, floor, request_type) in slave_request_assignments.new_requests(&new_request_assignments, &name) {
+                        for (active, floor, request_type) in new_request_assignments.requests(&name) {
                             if active {
                                 elevator_command_tx.send(ElevatorCommand::AddRequest(floor, request_type)).unwrap();
                             } else {
@@ -121,22 +121,17 @@ pub fn run_dispatcher(
                     Message::NewRequest(name, floor, request_type) => {
                         request_views.set_pending(floor, name, request_type);
                     },
-                    Message::ClearRequest(name, floor, request_type) => {
-                        request_views.set_inactive(floor, name, request_type, 0);
+                    Message::ClearRequest(name, floor, request_type, iteration) => {
+                        request_views.set_inactive(floor, name, request_type, iteration);
                     },
                     Message::Acks(name, requests) => {
-                        for (request_name, floor, request_type) in requests{
-                            request_views.add_ack(floor, request_name, request_type, name.clone());
+                        for (request_name, floor, request_type, iteration_check) in requests{
+                            request_views.add_ack(floor, request_name, request_type, name.clone(), iteration_check);
                         }
                     }
                     _ => {},
                 }
 
-                // if slave_worldview.iteration != master_worldview.iteration {
-                //     warn!("Received invalid worldview. ({} != {})", slave_worldview.iteration, master_worldview.iteration);
-                //     node.to_slaves_channel().send(DispatcherMessage::Synchronize(global_worldview.clone())).unwrap();
-                //     continue;
-                // }
                 request_views.set_all_acked_active(&connected_nodes);
 
                 match assign_requests(&request_views, &elevator_views) {
@@ -197,7 +192,7 @@ pub fn run_dispatcher(
 
                 let message = match elevator_event {
                     ElevatorEvent::RequestCleared(floor, request_type) => {
-                        Message::ClearRequest(name.clone(), floor, request_type)
+                        Message::ClearRequest(name.clone(), floor, request_type, request_views.iteration(floor, name.clone(), request_type))
                     },
                     ElevatorEvent::StateUpdated(state) => {
                         Message::ElevatorState(name.clone(), state)

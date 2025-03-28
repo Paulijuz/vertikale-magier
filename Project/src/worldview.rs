@@ -80,6 +80,7 @@ impl RequestState {
         }
 
         if self.iteration == iteration_check {
+            self.acks.clear();
             self.status = RequestStatus::Inactive;
         }
     }
@@ -101,10 +102,15 @@ impl RequestState {
         if required_acks.is_subset(&self.acks) {
             self.iteration += 1;
             self.status = RequestStatus::Active;
+            self.acks.clear();
         }
     }
 
-    fn add_ack(&mut self, name: String) {
+    fn add_ack(&mut self, name: String, iteration_check: u32) {
+        if self.iteration != iteration_check {
+            return;
+        }
+
         self.acks.insert(name);
     }
 
@@ -162,9 +168,9 @@ pub fn system_state_to_string(
     }
 
     output += &format!("Requests:\n");
-    output += &format!("{:>5} | {:<4} | {:<4}\n", "Floor", "Down", "Up");
+    output += &format!("{:>5} | {:<10} | {:<10}\n", "Floor", "Down", "Up");
     for (floor, (up, down)) in zip(&request_states.hall_up, &request_states.hall_down).enumerate() {
-        output += &format!("{:>5} | {:<4} | {:<4}\n", floor + 1, down.status, up.status,);
+        output += &format!("{:>5} | {:<3} ({:<4}) | {:<3} ({:<4})\n", floor + 1, down.status, down.acks.len(), up.status, up.acks.len());
     }
 
     output
@@ -239,9 +245,10 @@ impl RequestStates {
         request_name: String,
         request_type: RequestType,
         ack_name: String,
+        iteration_check: u32,
     ) {
         self.request_state_mut(floor, request_name, request_type)
-            .add_ack(ack_name);
+            .add_ack(ack_name, iteration_check);
     }
 
     pub fn merge(&mut self, other: &Self) -> bool {
@@ -275,20 +282,20 @@ impl RequestStates {
         changed
     }
 
-    pub fn not_acked(&self, name: &String) -> Vec<(String, usize, RequestType)> {
+    pub fn not_acked(&self, name: &String) -> Vec<(String, usize, RequestType, u32)> {
         let hall_up = self
             .hall_up
             .iter()
             .enumerate()
             .filter(|(_, request)| !request.acks.contains(name))
-            .map(|(floor, _)| (name.clone(), floor, RequestType::Hall(Direction::Up)));
+            .map(|(floor, request)| (name.clone(), floor, RequestType::Hall(Direction::Up), request.iteration));
 
         let hall_down = self
             .hall_down
             .iter()
             .enumerate()
             .filter(|(_, request)| !request.acks.contains(name))
-            .map(|(floor, _)| (name.clone(), floor, RequestType::Hall(Direction::Down)));
+            .map(|(floor, request)| (name.clone(), floor, RequestType::Hall(Direction::Down), request.iteration));
 
         let mut requests: Vec<_> = hall_up.into_iter().chain(hall_down).collect();
 
@@ -298,11 +305,20 @@ impl RequestStates {
                     cab.iter()
                         .enumerate()
                         .filter(|(_, request)| !request.acks.contains(name))
-                        .map(|(floor, _)| (name.clone(), floor, RequestType::Cab)),
+                        .map(|(floor, request)| (name.clone(), floor, RequestType::Cab, request.iteration)),
                 );
         }
                 
         requests
+    }
+
+    pub fn iteration(
+        &mut self,
+        floor: usize,
+        name: String,
+        request_type: RequestType,
+    ) -> u32 {
+        self.request_state_mut(floor, name, request_type).iteration
     }
 
     pub fn hall_requests_as_bools(&self) -> Vec<(bool, bool)> {

@@ -7,7 +7,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::network::{ConnectionUpdate, Node};
+use crate::network::{Role, Node};
 use crate::worldview::RequestStates;
 use crate::{backup::save_state_to_file, worldview::system_state_to_string};
 use crate::{
@@ -43,8 +43,7 @@ pub fn run_dispatcher(
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
     let mut request_views = inital_worldview;
-    let mut master_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
-    let mut slave_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
+    let mut request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
     let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
     let mut connected_nodes: HashSet<String> = HashSet::new();
 
@@ -75,17 +74,15 @@ pub fn run_dispatcher(
                     },
                     Message::RequestAssignments(new_request_assignments) => {
                         // info!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
+                        request_assignments = request_assignments;
 
-                        for (active, floor, request_type) in new_request_assignments.requests(&name) {
+                        for (active, floor, request_type) in request_assignments.requests(&name) {
                             if active {
                                 elevator_command_tx.send(ElevatorCommand::AddRequest(floor, request_type)).unwrap();
                             } else {
                                 elevator_command_tx.send(ElevatorCommand::ClearRequest(floor, request_type)).unwrap();
                             }
                         }
-
-                        slave_request_assignments = new_request_assignments.clone();
-                        master_request_assignments = new_request_assignments;
                     },
                     invalid_message => {
                         warn!("Received invalid message from master: {invalid_message:?}");
@@ -93,7 +90,7 @@ pub fn run_dispatcher(
                     },
                 }
 
-                info!("{}\n", system_state_to_string(&request_views, &slave_request_assignments, &elevator_views));
+                info!("{}\n", system_state_to_string(&request_views, &request_assignments, &elevator_views));
             },
             recv(node.from_slave_channel()) -> message => {
                 let message = message.unwrap();
@@ -119,37 +116,51 @@ pub fn run_dispatcher(
                         });
                     },
                     Message::NewRequest(name, floor, request_type) => {
-                        request_views.set_pending(floor, name, request_type);
+                        if !request_views.set_pending(floor, name, request_type) {
+                            warn!("Failed to set request to pending.");
+                            continue;
+                        }
                     },
                     Message::ClearRequest(name, floor, request_type, iteration) => {
-                        request_views.set_inactive(floor, name, request_type, iteration);
+                        if !request_views.set_inactive(floor, name, request_type, iteration) {
+                            warn!("Failed to clear request.");
+                            continue;
+                        }
                     },
                     Message::Acks(name, requests) => {
+                        let mut changed = false;
+
                         for (request_name, floor, request_type, iteration_check) in requests{
-                            request_views.add_ack(floor, request_name, request_type, name.clone(), iteration_check);
+                            changed |= request_views.add_ack(floor, request_name, request_type, name.clone(), iteration_check);
+                        }
+
+                        if !changed {
+                            warn!("Failed to acknowledge.");
+                            continue;
                         }
                     }
                     _ => {},
                 }
 
-                request_views.set_all_acked_active(&connected_nodes);
+                if request_views.set_all_acked_active(&connected_nodes) {
+                    match assign_requests(&request_views, &elevator_views) {
+                        Some(new_request_assignment) => request_assignments = new_request_assignment,
+                        None => error!("Could not assign requests."),
+                    }
 
-                match assign_requests(&request_views, &elevator_views) {
-                    Some(new_request_assignment) => master_request_assignments = new_request_assignment,
-                    None => error!("Could not assign requests."),
+                    node.to_slaves_channel().send(Message::RequestAssignments(request_assignments.clone())).unwrap();
                 }
 
                 node.to_slaves_channel().send(Message::RequestStates(request_views.clone())).unwrap();
-                node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
             },
             recv(node.connection_update_channel()) -> connection_update => {
                 let connection_update = connection_update.unwrap();
 
                 match connection_update {
-                    ConnectionUpdate::Slave => {
+                    Role::Slave => {
                         connected_nodes.clear();
                     },
-                    ConnectionUpdate::Master(nodes) if nodes != connected_nodes => {
+                    Role::Master(nodes) if nodes != connected_nodes => {
                         connected_nodes = nodes;
                         info!("Connected nodes: {connected_nodes:?}");
                     },
@@ -158,6 +169,8 @@ pub fn run_dispatcher(
             },
             //Start to inform slaves that master exists
             recv(deactivation_ticker) -> _ => {
+                
+
                 //Received current timestamp
                 let now = SystemTime::now();
                 let mut changed = false;
@@ -171,7 +184,7 @@ pub fn run_dispatcher(
                         continue;
                     };
 
-                    if master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
+                    if request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
                         info!("Deactivating {name}. :(");
                         elevator.active = false;
                         changed = true;
@@ -180,11 +193,11 @@ pub fn run_dispatcher(
 
                 if changed {
                     match assign_requests(&request_views, &elevator_views) {
-                        Some(new_request_assignment) => master_request_assignments = new_request_assignment,
+                        Some(new_request_assignment) => request_assignments = new_request_assignment,
                         None => error!("Could not assign requests."),
                     }
 
-                    node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
+                    node.to_slaves_channel().send(Message::RequestAssignments(request_assignments.clone())).unwrap();
                 }
             },
             recv(elevator_event_rx) -> elevator_event => {
@@ -192,7 +205,7 @@ pub fn run_dispatcher(
 
                 let message = match elevator_event {
                     ElevatorEvent::RequestCleared(floor, request_type) => {
-                        Message::ClearRequest(name.clone(), floor, request_type, request_views.iteration(floor, name.clone(), request_type))
+                        Message::ClearRequest(name.clone(), floor, request_type, request_views.iteration(floor, &name, request_type))
                     },
                     ElevatorEvent::StateUpdated(state) => {
                         Message::ElevatorState(name.clone(), state)

@@ -18,12 +18,12 @@ use std::{
 const NODE_ADVERTISMENT_IP: [u8; 4] = [239, 0, 0, 52];
 const NODE_ADVERTISMENT_PORT: u16 = 52000;
 
-enum Role<T: Transmit> {
-    Master(Host<T>),
-    Slave(Client<T>),
+enum State<T: Transmit> {
+    Host(Host<T>),
+    Client(Client<T>),
 }
 
-pub enum ConnectionUpdate {
+pub enum Role {
     Slave,
     Master(HashSet<String>),
 }
@@ -35,7 +35,7 @@ struct NodeAdvertisment {
 }
 
 pub struct Node<T: Transmit> {
-    connection_upate_channel: Receiver<ConnectionUpdate>,
+    connection_upate_channel: Receiver<Role>,
     from_master_channel: Receiver<T>,
     from_slave_channel: Receiver<T>,
     to_master_channel: Sender<T>,
@@ -47,7 +47,7 @@ pub struct Node<T: Transmit> {
 impl<T: Transmit> Node<T> {
     pub fn new(name: String) -> Self {
         let (connection_upate_channel_tx, connection_upate_channel_rx) =
-            unbounded::<ConnectionUpdate>();
+            unbounded::<Role>();
         let (from_master_channel_tx, from_master_channel_rx) = unbounded::<T>();
         let (from_slave_channel_tx, from_slave_channel_rx) = unbounded::<T>();
         let (to_master_channel_tx, to_master_channel_rx) = unbounded::<T>();
@@ -77,7 +77,7 @@ impl<T: Transmit> Node<T> {
         }
     }
 
-    pub fn connection_update_channel(&self) -> &Receiver<ConnectionUpdate> {
+    pub fn connection_update_channel(&self) -> &Receiver<Role> {
         &self.connection_upate_channel
     }
 
@@ -109,7 +109,7 @@ impl<T: Transmit> Drop for Node<T> {
 
 fn run_node<T: Transmit>(
     name: String,
-    connection_update_channel: Sender<ConnectionUpdate>,
+    connection_update_channel: Sender<Role>,
     from_master_channel: Sender<T>,
     from_slave_channel: Sender<T>,
     to_master_channel: Receiver<T>,
@@ -132,9 +132,9 @@ fn run_node<T: Transmit>(
     .unwrap();
     advertiser.start_advertising();
 
-    let mut role = Role::Master(host);
+    let mut state = State::Host(host);
     connection_update_channel
-        .send(ConnectionUpdate::Master(HashSet::from([name.clone()])))
+        .send(Role::Master(HashSet::from([name.clone()])))
         .unwrap();
 
     info!("New node started as master on port {port}.");
@@ -142,12 +142,12 @@ fn run_node<T: Transmit>(
     loop {
         // If the node is a slave it doesn't have a host so we have to set its
         // host receive channel to "never" and vice versa for when the node is a master.
-        let host_receive_channel = match &role {
-            Role::Master(host) => host.receive_channel(),
+        let host_receive_channel = match &state {
+            State::Host(host) => host.receive_channel(),
             _ => &never(),
         };
-        let client_receive_channel = match &role {
-            Role::Slave(client) => client.receive_channel(),
+        let client_receive_channel = match &state {
+            State::Client(client) => client.receive_channel(),
             _ => &never(),
         };
 
@@ -155,13 +155,13 @@ fn run_node<T: Transmit>(
             recv(advertiser.receive_channel()) -> advertisments => {
                 let advertisments = advertisments.unwrap();
 
-                if matches!(role, Role::Slave(_)) {
+                if matches!(state, State::Client(_)) {
                     continue;
                 }
 
                 let mut names: HashSet<String> = advertisments.iter().map(|(_, advertisment)| advertisment.name.clone()).collect();
                 names.insert(name.clone());
-                connection_update_channel.send(ConnectionUpdate::Master(names)).unwrap();
+                connection_update_channel.send(Role::Master(names)).unwrap();
 
                 for (address, advertisment) in advertisments {
                     let Some(port) = advertisment.port else {
@@ -185,8 +185,8 @@ fn run_node<T: Transmit>(
                     debug!("Connecting...");
 
                     if let Ok(client) = Client::new_tcp_client(address.ip().octets(), port) {
-                        role = Role::Slave(client);
-                        connection_update_channel.send(ConnectionUpdate::Slave).unwrap();
+                        state = State::Client(client);
+                        connection_update_channel.send(Role::Slave).unwrap();
                         info!("Successfully connected to master \"{}\"! Now slave.", advertisment.name);
                         break;
                     }
@@ -202,7 +202,7 @@ fn run_node<T: Transmit>(
             recv(host_receive_channel) -> message => {
                 debug!("Data from slave recieved!");
 
-                if matches!(role, Role::Slave(_)) {
+                if matches!(state, State::Client(_)) {
                     panic!("A slave should not be able to receive a message from another slave.")
                 }
 
@@ -213,7 +213,7 @@ fn run_node<T: Transmit>(
             recv(client_receive_channel) -> message => {
                 debug!("Data from master recieved.");
 
-                if matches!(role, Role::Master(_)) {
+                if matches!(state, State::Host(_)) {
                     panic!("A master should not be able to receive a message from another master.")
                 }
 
@@ -228,8 +228,8 @@ fn run_node<T: Transmit>(
                         port: Some(port),
                     });
 
-                    role = Role::Master(host);
-                    connection_update_channel.send(ConnectionUpdate::Master(HashSet::from([name.clone()]))).unwrap();
+                    state = State::Host(host);
+                    connection_update_channel.send(Role::Master(HashSet::from([name.clone()]))).unwrap();
 
                     info!("Now master.");
                     continue;
@@ -240,21 +240,21 @@ fn run_node<T: Transmit>(
             recv(to_slaves_channel) -> message => {
                 let message = message.unwrap();
 
-                match &role {
-                    Role::Master(host) => {
+                match &state {
+                    State::Host(host) => {
                         from_master_channel.send(message.clone()).unwrap();
                         host.send_channel().send((ALL_CLIENTS, message)).unwrap();
                     },
-                    Role::Slave(_) => warn!("Tried sending to slaves while being a slave node."),
+                    State::Client(_) => warn!("Tried sending to slaves while being a slave node."),
                 };
             },
             recv(to_master_channel) -> message => {
                 let message = message.unwrap();
 
                 // Send back to our selves if we are the master node.
-                match &role {
-                    Role::Master(_) => from_slave_channel.send(message).unwrap(),
-                    Role::Slave(client) => client.send_channel().send(message).unwrap(),
+                match &state {
+                    State::Host(_) => from_slave_channel.send(message).unwrap(),
+                    State::Client(client) => client.send_channel().send(message).unwrap(),
                 };
             },
             recv(shutdown_channel) -> _ => {

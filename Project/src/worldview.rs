@@ -74,44 +74,60 @@ pub struct RequestState {
 }
 
 impl RequestState {
-    fn set_inactive(&mut self, iteration_check: u32) {
+    fn set_inactive(&mut self, iteration_check: u32) -> bool {
         if self.status != RequestStatus::Active {
-            return;
+            return false;
         }
 
-        if self.iteration == iteration_check {
-            self.acks.clear();
-            self.status = RequestStatus::Inactive;
-        }
+        if self.iteration != iteration_check {
+            return false;
+        } 
+        
+        self.acks.clear();
+        self.status = RequestStatus::Inactive;
+
+        return true;
     }
 
-    fn set_pending(&mut self) {
+    fn set_pending(&mut self) -> bool {
         if self.status != RequestStatus::Inactive {
-            return;
+            return false;
         }
 
         self.acks.clear();
         self.status = RequestStatus::Pending;
+
+        return true;
     }
 
-    fn set_active(&mut self, required_acks: &HashSet<String>) {
+    fn set_active(&mut self, required_acks: &HashSet<String>) -> bool {
         if self.status != RequestStatus::Pending {
-            return;
+            return false;
         }
 
-        if required_acks.is_subset(&self.acks) {
-            self.iteration += 1;
-            self.status = RequestStatus::Active;
-            self.acks.clear();
+        if !required_acks.is_subset(&self.acks) {
+            return false;
         }
+
+        self.iteration += 1;
+        self.status = RequestStatus::Active;
+        self.acks.clear();
+
+        return true;
     }
 
-    fn add_ack(&mut self, name: String, iteration_check: u32) {
+    fn add_ack(&mut self, name: String, iteration_check: u32) -> bool {
         if self.iteration != iteration_check {
-            return;
+            return false;
+        }
+
+        if self.acks.contains(&name) {
+            return false;
         }
 
         self.acks.insert(name);
+
+        return true;
     }
 
     fn merge(&mut self, other: &Self) -> bool {
@@ -207,36 +223,56 @@ impl RequestStates {
         }
     }
 
+    fn request_state(
+        &self,
+        floor: usize,
+        name: &String,
+        request_type: RequestType,
+    ) -> Option<&RequestState> {
+        match request_type {
+            RequestType::Hall(Direction::Up) => Some(&self.hall_up[floor]),
+            RequestType::Hall(Direction::Down) => Some(&self.hall_down[floor]),
+            RequestType::Cab => self
+                .cab
+                .get(name).map(|requests| &requests[floor])
+        }
+    }
+
+
     pub fn set_inactive(
         &mut self,
         floor: usize,
         name: String,
         request_type: RequestType,
         iteration_check: u32,
-    ) {
+    ) -> bool {
         self.request_state_mut(floor, name, request_type)
-            .set_inactive(iteration_check);
+            .set_inactive(iteration_check)
     }
 
-    pub fn set_pending(&mut self, floor: usize, name: String, request_type: RequestType) {
+    pub fn set_pending(&mut self, floor: usize, name: String, request_type: RequestType) -> bool {
         self.request_state_mut(floor, name, request_type)
-            .set_pending();
+            .set_pending()
     }
 
-    pub fn set_all_acked_active(&mut self, required_acks: &HashSet<String>) {
+    pub fn set_all_acked_active(&mut self, required_acks: &HashSet<String>) -> bool {
+        let mut changed = false;
+
         for cab_requests in self.cab.values_mut() {
             for cab_request in cab_requests {
-                cab_request.set_active(required_acks);
+                changed |= cab_request.set_active(required_acks);
             }
         }
 
         for hall_up_request in &mut self.hall_up {
-            hall_up_request.set_active(required_acks);
+            changed |= hall_up_request.set_active(required_acks);
         }
 
         for hall_down_request in &mut self.hall_down {
-            hall_down_request.set_active(required_acks);
+            changed |= hall_down_request.set_active(required_acks);
         }
+
+        changed
     }
 
     pub fn add_ack(
@@ -246,13 +282,13 @@ impl RequestStates {
         request_type: RequestType,
         ack_name: String,
         iteration_check: u32,
-    ) {
+    ) -> bool {
         self.request_state_mut(floor, request_name, request_type)
-            .add_ack(ack_name, iteration_check);
+            .add_ack(ack_name, iteration_check)
     }
 
     pub fn merge(&mut self, other: &Self) -> bool {
-        let changed = false;
+        let mut changed = false;
 
         for name in self.cab.clone().keys().chain(other.cab.keys()) {
             let Some(self_cab_requests) = self.cab.get_mut(name) else {
@@ -265,18 +301,18 @@ impl RequestStates {
 
             for (self_cab_request, other_cab_request) in zip(self_cab_requests, other_cab_requests)
             {
-                self_cab_request.merge(other_cab_request);
+                changed |= self_cab_request.merge(other_cab_request);
             }
         }
 
         for (self_hall_up_state, other_hall_up_state) in zip(&mut self.hall_up, &other.hall_up) {
-            self_hall_up_state.merge(other_hall_up_state);
+            changed |= self_hall_up_state.merge(other_hall_up_state);
         }
 
         for (self_hall_down_state, other_hall_down_state) in
             zip(&mut self.hall_down, &other.hall_down)
         {
-            self_hall_down_state.merge(other_hall_down_state);
+            changed |= self_hall_down_state.merge(other_hall_down_state);
         }
 
         changed
@@ -315,10 +351,10 @@ impl RequestStates {
     pub fn iteration(
         &mut self,
         floor: usize,
-        name: String,
+        name: &String,
         request_type: RequestType,
     ) -> u32 {
-        self.request_state_mut(floor, name, request_type).iteration
+        self.request_state(floor, name, request_type).map_or(0, |request| request.iteration)
     }
 
     pub fn hall_requests_as_bools(&self) -> Vec<(bool, bool)> {

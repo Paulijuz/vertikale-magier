@@ -3,4 +3,4 @@ mod client;
 mod host;
 mod node;
 
-pub use node::{ConnectionUpdate, Node};
+pub use node::{Role, Node};

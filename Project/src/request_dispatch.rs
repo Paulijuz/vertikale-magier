@@ -42,16 +42,18 @@ pub fn run_dispatcher(
     elevator_command_tx: Sender<ElevatorCommand>,
     elevator_event_rx: Receiver<ElevatorEvent>,
 ) {
-    let mut request_views = inital_worldview;
-    let mut request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
+    let mut slave_request_views = inital_worldview.clone();
+    let mut master_request_views = inital_worldview;
+    let mut slave_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
+    let mut master_request_assignments = RequestAssignments::new(elevio_driver.num_floors as usize);
     let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
     let mut role: Role = Role::Master(HashSet::new());
 
     let deactivation_ticker = tick(DEACTIVATION_POLL);
     let call_button_channel = create_call_button_channel(elevio_driver);
 
-    set_cab_lights(&elevio_driver, &request_views.cab_requests_as_bools(&name));
-    set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
+    set_cab_lights(&elevio_driver, &slave_request_views.cab_requests_as_bools(&name));
+    set_hall_lights(&elevio_driver, &slave_request_views.hall_requests_as_bools());
 
     loop {
         select! {
@@ -61,22 +63,22 @@ pub fn run_dispatcher(
                 match message {
                     Message::RequestStates(new_request_views) => {
                         // debug!("Received state from master \"{}\":\n{:?}", name, new_request_views);
-                        request_views = new_request_views;
+                        slave_request_views = new_request_views;
 
-                        let not_acked = request_views.not_acked(&name);
+                        let not_acked = slave_request_views.not_acked(&name);
 
                         if not_acked.len() > 0 {
                             node.to_master_channel().send(Message::Acks(name.clone(), not_acked)).unwrap();
                         }
 
-                        set_cab_lights(&elevio_driver, &request_views.cab_requests_as_bools(&name));
-                        set_hall_lights(&elevio_driver, &request_views.hall_requests_as_bools());
+                        set_cab_lights(&elevio_driver, &slave_request_views.cab_requests_as_bools(&name));
+                        set_hall_lights(&elevio_driver, &slave_request_views.hall_requests_as_bools());
                     },
                     Message::RequestAssignments(new_request_assignments) => {
                         // debug!("Received request assignments from master \"{}\":\n{:?}", name, new_request_assignments);
-                        request_assignments = new_request_assignments;
+                        slave_request_assignments = new_request_assignments;
 
-                        for (active, floor, request_type) in request_assignments.requests(&name) {
+                        for (active, floor, request_type) in slave_request_assignments.requests(&name) {
                             if active {
                                 elevator_command_tx.send(ElevatorCommand::AddRequest(floor, request_type)).unwrap();
                             } else {
@@ -90,7 +92,10 @@ pub fn run_dispatcher(
                     },
                 }
 
-                info!("{}\n", system_state_to_string(&request_views, &request_assignments, &elevator_views));
+                master_request_views = slave_request_views.clone();
+                master_request_assignments = slave_request_assignments.clone();
+
+                info!("{}\n", system_state_to_string(&slave_request_views, &slave_request_assignments, &elevator_views));
             },
             recv(node.from_slave_channel()) -> message => {
                 let message = message.unwrap();
@@ -121,7 +126,7 @@ pub fn run_dispatcher(
                         });
                     },
                     Message::NewRequest(name, floor, request_type) => {
-                        if !request_views.set_pending(floor, name, request_type) {
+                        if !master_request_views.set_pending(floor, name, request_type) {
                             warn!("Failed to set request to pending.");
                             continue;
                         }
@@ -130,7 +135,7 @@ pub fn run_dispatcher(
                         let mut changed = false;
 
                         for (floor, request_type, iteration) in requests {
-                            changed |= request_views.set_inactive(floor, name.clone(), request_type, iteration);
+                            changed |= master_request_views.set_inactive(floor, name.clone(), request_type, iteration);
                         }
 
                         if !changed {
@@ -142,7 +147,7 @@ pub fn run_dispatcher(
                         let mut changed = false;
 
                         for (request_name, floor, request_type, iteration_check) in requests{
-                            changed |= request_views.add_ack(floor, request_name, request_type, name.clone(), iteration_check);
+                            changed |= master_request_views.add_ack(floor, request_name, request_type, name.clone(), iteration_check);
                         }
 
                         if !changed {
@@ -153,16 +158,16 @@ pub fn run_dispatcher(
                     _ => {},
                 }
 
-                if request_views.set_all_acked_active(&connected_nodes) {
-                    match assign_requests(&request_views, &elevator_views) {
-                        Some(new_request_assignment) => request_assignments = new_request_assignment,
+                if master_request_views.set_all_acked_active(&connected_nodes) {
+                    match assign_requests(&master_request_views, &elevator_views) {
+                        Some(new_request_assignment) => master_request_assignments = new_request_assignment,
                         None => error!("Could not assign requests."),
                     }
 
-                    node.to_slaves_channel().send(Message::RequestAssignments(request_assignments.clone())).unwrap();
+                    node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
                 }
 
-                node.to_slaves_channel().send(Message::RequestStates(request_views.clone())).unwrap();
+                node.to_slaves_channel().send(Message::RequestStates(master_request_views.clone())).unwrap();
             },
             recv(node.connection_update_channel()) -> connection_update => {
                 let new_role = connection_update.unwrap();
@@ -194,7 +199,7 @@ pub fn run_dispatcher(
                         continue;
                     };
 
-                    if request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
+                    if master_request_assignments.has_assignment(name) && duration > ELEVATOR_TIMEOUT {
                         info!("Deactivating {name}. :(");
                         elevator.active = false;
                         changed = true;
@@ -202,12 +207,12 @@ pub fn run_dispatcher(
                 }
 
                 if changed {
-                    match assign_requests(&request_views, &elevator_views) {
-                        Some(new_request_assignment) => request_assignments = new_request_assignment,
+                    match assign_requests(&master_request_views, &elevator_views) {
+                        Some(new_request_assignment) => master_request_assignments = new_request_assignment,
                         None => error!("Could not assign requests."),
                     }
 
-                    node.to_slaves_channel().send(Message::RequestAssignments(request_assignments.clone())).unwrap();
+                    node.to_slaves_channel().send(Message::RequestAssignments(master_request_assignments.clone())).unwrap();
                 }
             },
             recv(elevator_event_rx) -> elevator_event => {
@@ -215,7 +220,7 @@ pub fn run_dispatcher(
 
                 let message = match elevator_event {
                     ElevatorEvent::RequestsCleared(requests) => {
-                        Message::ClearRequests(name.clone(), requests.iter().map(|&(floor, request_type)| (floor, request_type, request_views.iteration(floor, &name, request_type))).collect())
+                        Message::ClearRequests(name.clone(), requests.iter().map(|&(floor, request_type)| (floor, request_type, slave_request_views.iteration(floor, &name, request_type))).collect())
                     },
                     ElevatorEvent::StateUpdated(state) => {
                         Message::ElevatorState(name.clone(), state)
@@ -243,7 +248,7 @@ pub fn run_dispatcher(
             },
         }
 
-        if let Err(e) = save_state_to_file(&request_views, "backup.json") {
+        if let Err(e) = save_state_to_file(&master_request_views, "backup.json") {
             error!("Could not save backup file: {e}");
         }
     }

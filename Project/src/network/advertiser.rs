@@ -10,6 +10,7 @@ use super::client::{Client, Transmit};
 
 const ADVERTISING_INTERVAL: Duration = Duration::from_millis(100);
 const ADVERTISMENT_LINGER: Duration = Duration::from_millis(5000);
+const ADVERTISMENT_POLL: Duration = Duration::from_millis(100);
 const ADVERTISER_ID_LENGTH: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,7 +51,8 @@ fn run_advertiser<T: Transmit + PartialEq + Eq + Hash>(
     let mut received_advertisments: HashMap<[u8; ADVERTISER_ID_LENGTH], (SocketAddrV4, Instant, T)> = HashMap::new();
     let mut is_advertising = false;
 
-    let ticker = tick(ADVERTISING_INTERVAL);
+    let send_ticker = tick(ADVERTISING_INTERVAL);
+    let poll_ticker = tick(ADVERTISMENT_POLL);
 
     loop {
         select! {
@@ -62,7 +64,7 @@ fn run_advertiser<T: Transmit + PartialEq + Eq + Hash>(
                     AdvertiserCommand::Exit => break,
                 }
             },
-            recv(ticker) -> _ => {
+            recv(send_ticker) -> _ => {
                 if !is_advertising {
                     continue;
                 }
@@ -79,6 +81,8 @@ fn run_advertiser<T: Transmit + PartialEq + Eq + Hash>(
                 }
 
                 received_advertisments.insert(received_advertisment.sender_id, (address, Instant::now(), received_advertisment.data));
+            },
+            recv(poll_ticker) -> _ => {
                 received_advertisments.retain(|_, (_, instant_received, _)| instant_received.elapsed() < ADVERTISMENT_LINGER);
 
                 let received_advertisment_data: HashSet<(SocketAddrV4, T)> = received_advertisments

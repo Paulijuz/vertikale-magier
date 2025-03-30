@@ -27,4 +27,5 @@ pub fn clear_all_lights(elevio_driver: &Elevator) {
     // It is not possible to turn of the floor indicator so we'll just set it to the first floor.
     elevio_driver.floor_indicator(0);
     elevio_driver.stop_button_light(false);
+    elevio_driver.door_light(false);
 }

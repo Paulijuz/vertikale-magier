@@ -296,11 +296,12 @@ impl RequestStates {
         let mut changed = false;
 
         for name in self.cab.clone().keys().chain(other.cab.keys()) {
-            let Some(self_cab_requests) = self.cab.get_mut(name) else {
+            let Some(other_cab_requests) = other.cab.get(name) else {
                 continue;
             };
 
-            let Some(other_cab_requests) = other.cab.get(name) else {
+            let Some(self_cab_requests) = self.cab.get_mut(name) else {
+                self.cab.insert(name.clone(), other_cab_requests.clone());
                 continue;
             };
 

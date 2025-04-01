@@ -23,7 +23,7 @@ use crate::{
 
 const DEACTIVATION_POLL: Duration = Duration::from_millis(100);
 const ELEVATOR_TIMEOUT: Duration = Duration::from_millis(4000);
-const ELEVATOR_TIMEIN: Duration = Duration::from_millis(14000);
+const ELEVATOR_TIMEIN: Duration = Duration::from_millis(24000);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
@@ -57,6 +57,7 @@ pub fn run_dispatcher(
     let mut elevator_views: HashMap<String, ElevatorView> = HashMap::new();
     let mut newest_elevator_state: Option<ElevatorState> = None;
     let mut role: Role = Role::Master(HashSet::new());
+    let mut synchronized = true; 
 
     let request_timeout_ticker = tick(DEACTIVATION_POLL);
     let call_button_channel = create_call_button_channel(elevio_driver);
@@ -70,8 +71,19 @@ pub fn run_dispatcher(
                 let message = message.unwrap();
 
                 match message {
-                    Message::RequestStates(new_request_views) => {
-                        slave_request_states = new_request_views;
+                    Message::RequestStates(new_request_states) => {
+                        if !synchronized {
+                            master_request_states.merge(&new_request_states);
+                            
+                            if master_request_states != new_request_states {
+                                node.to_master_channel().send(Message::RequestStates(master_request_states.clone())).unwrap();
+                                continue;
+                            }
+
+                            synchronized = true;
+                        }
+
+                        slave_request_states = new_request_states;
 
                         let not_acked = slave_request_states.not_acked(&name);
 
@@ -99,8 +111,10 @@ pub fn run_dispatcher(
                     },
                 }
 
-                master_request_states = slave_request_states.clone();
-                master_request_assignments = slave_request_assignments.clone();
+                if role == Role::Slave {
+                    master_request_states = slave_request_states.clone();
+                    master_request_assignments = slave_request_assignments.clone();
+                }
 
                 info!("{}\n", system_state_to_string(&slave_request_states, &slave_request_assignments, &elevator_views));
             },
@@ -168,7 +182,12 @@ pub fn run_dispatcher(
                             warn!("Failed to acknowledge.");
                             continue;
                         }
-                    }
+                    },
+                    Message::RequestStates(received_request_states) => {
+                        master_request_states.merge(&received_request_states);
+                        node.to_slaves_channel().send(Message::RequestStates(master_request_states.clone())).unwrap();
+                        continue;
+                    },
                     _ => {},
                 }
 
@@ -197,8 +216,14 @@ pub fn run_dispatcher(
                         Role::Master(connected_nodes) => {
                             info!("Connected nodes: {connected_nodes:?}");
                         },
-                        Role::Slave => if let Some(elevator_state) = newest_elevator_state {
-                            node.to_master_channel().send(Message::ElevatorState(name.clone(), elevator_state)).unwrap();
+                        Role::Slave => {
+                            synchronized = false;
+
+                            node.to_master_channel().send(Message::RequestStates(master_request_states.clone())).unwrap();
+
+                            if let Some(elevator_state) = newest_elevator_state {
+                                node.to_master_channel().send(Message::ElevatorState(name.clone(), elevator_state)).unwrap();
+                            }
                         },
                     }
                 }
@@ -227,6 +252,7 @@ pub fn run_dispatcher(
                     } else if !elevator.active && (duration < ELEVATOR_TIMEOUT || duration > ELEVATOR_TIMEIN) {
                         info!("Activating {name}. :)");
                         elevator.active = true;
+                        elevator.timestamp_last_event = SystemTime::now();
                         changed = true;
                     }
                 }

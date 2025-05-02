@@ -1,0 +1,11 @@
+@startuml MasterSlave
+
+skinparam linetype ortho
+
+
+[*] --> Master
+
+Master --> Slave : \tOther master advetisment received &&\n\tOther master's name > our name &&\n\tConnection to other master succeeded
+Master <-- Slave : Connection to master lost\t
+
+@enduml

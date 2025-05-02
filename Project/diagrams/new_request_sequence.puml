@@ -1,0 +1,70 @@
+@startuml SendingSequence
+
+-> "Slave 1" : Call button pressed
+activate "Slave 1"
+
+"Slave 1" -> Master : New request
+deactivate "Slave 1"
+activate Master
+
+Master -> Master : Set request state to "pending"
+
+Master -> "Slave 1" : Updated request states
+activate "Slave 1"
+
+Master -> "Slave 2" : Updated request states
+deactivate Master
+activate "Slave 2"
+
+"Slave 1" -> "Slave 1" : Store request states 
+"Slave 2" -> "Slave 2" : Store request states
+
+"Slave 1" -> Master : Ack pending requests
+deactivate "Slave 1"
+activate Master
+
+Master -> Master : Add Slave 1 to request's ack list
+Master -[hidden]-> Master
+deactivate Master
+
+"Slave 2" -> Master : Ack pending requests
+deactivate "Slave 2"
+activate Master
+
+Master -> Master : Add Slave 2 to request's ack list
+
+Master -> Master : Set request state to "active"
+Master -> : Call button light on
+
+Master -> "Slave 1" : Updated request states
+activate "Slave 1"
+
+Master -> "Slave 2" : Updated request states
+activate "Slave 2"
+
+"Slave 1" -> "Slave 1" : Store request states 
+"Slave 1" -[hidden]> "Slave 1"
+"Slave 2" -> "Slave 2" : Store request states
+<- "Slave 1" : Call button light on
+deactivate "Slave 1"
+"Slave 2" -> : Call button light on
+deactivate "Slave 2"
+
+Master -> Master : Run hall request assigner
+
+Master -> "Slave 1" : Request assignments
+activate "Slave 1"
+Master -> "Slave 2" : Request assignments
+deactivate Master
+activate "Slave 2"
+
+"Slave 1" -> "Slave 1" : Store request assignments 
+"Slave 1" -[hidden]-> "Slave 1"
+deactivate "Slave 1"
+
+"Slave 2" -> "Slave 2" : Store request assignments 
+
+"Slave 2" -> : Start moving to floor
+deactivate "Slave 2"
+
+@enduml

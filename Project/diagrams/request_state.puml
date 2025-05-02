@@ -1,0 +1,18 @@
+@startuml
+
+skinparam linetype ortho
+skinparam nodesep 120
+
+[*] --> Inactive
+
+Inactive : Light is off\n\n
+Pending : Light still off\nState sent to slaves\n\n
+Active : Light is on\nIteration number is increased\nReqeust is assigned
+
+Inactive -right-> Pending : Button pressed
+
+Pending -> Active : All elevators\n acknowledged
+
+Active -left-> Inactive : \nCorresponding floor and direction cleared &&\niteration number matches
+
+@enduml

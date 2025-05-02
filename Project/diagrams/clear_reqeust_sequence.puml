@@ -1,0 +1,44 @@
+@startuml SendingSequence
+
+-> "Slave 1" : Floor cleared
+activate "Slave 1"
+
+"Slave 1" -> Master : Clear request
+deactivate "Slave 1"
+activate Master
+
+Master -> Master : Set request state to "inactive"\nif iteration numbers match
+Master -> : Call light off
+
+Master -> "Slave 1" : Updated request states
+activate "Slave 1"
+
+Master -> "Slave 2" : Updated request states
+activate "Slave 2"
+
+"Slave 1" -> "Slave 1" : Store request states 
+"Slave 1" -[hidden]> "Slave 1"
+<- "Slave 1" : Call light off
+deactivate "Slave 1"
+"Slave 2" -> "Slave 2" : Store request states
+"Slave 2" -> : Call light off
+deactivate "Slave 2"
+
+Master -> Master : Run hall request assigner
+
+Master -> "Slave 1" : Request assignments
+activate "Slave 1"
+Master -> "Slave 2" : Request assignments
+deactivate Master
+activate "Slave 2"
+
+"Slave 1" -> "Slave 1" : Store request assignments 
+"Slave 1" -[hidden]-> "Slave 1"
+deactivate "Slave 1"
+
+"Slave 2" -> "Slave 2" : Store request assignments 
+"Slave 2" -[hidden]-> "Slave 2"
+deactivate "Slave 2"
+
+
+@enduml
